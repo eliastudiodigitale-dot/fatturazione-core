@@ -1,0 +1,76 @@
+# Copia di ciò che è applicato nel namespace 'platform' (ricostruita dai parametri usati il 2026-11-07).
+# [NON VERIFICATO] byte per byte: prima di riapplicare confronta con: kubectl -n platform get cronjob fatturazione-backup -o yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fatturazione-backup
+  namespace: platform
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fatturazione-backup
+  namespace: platform
+spec:
+  schedule: "40 3 * * *"
+  timeZone: Europe/Rome
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+          containers:
+            - name: dump
+              image: postgres:16
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: PGUSER
+                  valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_USER}}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_PASS}}
+                - name: PGDATABASE
+                  valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_DB}}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  cd /backup
+                  F="fatturazione-$(date +%Y%m%d-%H%M%S).dump"
+                  pg_dump -h services-postgres -Fc -f "$F.tmp"
+                  pg_restore -l "$F.tmp" > /dev/null
+                  if [ "$(stat -c %s "$F.tmp")" -gt 20971520 ]; then
+                    echo "dump oltre 20 MB: scartato"; rm -f "$F.tmp"; exit 1
+                  fi
+                  mv "$F.tmp" "$F"
+                  find . -name 'fatturazione-*.dump' -mtime +30 -delete
+                  while [ "$(du -sk . | cut -f1)" -gt 204800 ] && [ "$(ls -1 fatturazione-*.dump | wc -l)" -gt 1 ]; do
+                    rm -f "$(ls -1tr fatturazione-*.dump | head -1)"
+                  done
+                  ls -l
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: backup
+              persistentVolumeClaim: {claimName: fatturazione-backup}
+            - name: tmp
+              emptyDir: {}

@@ -1,0 +1,54 @@
+# Copia di ciò che è applicato nel namespace 'platform' (ricostruita dai parametri usati il 2026-11-07).
+# [NON VERIFICATO] byte per byte: confronta con: kubectl -n platform get cronjob fatturazione-pulizia -o yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fatturazione-pulizia
+  namespace: platform
+spec:
+  schedule: "20 3 * * *"
+  timeZone: Europe/Rome
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+          containers:
+            - name: pulizia
+              image: postgres:16
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: PGUSER
+                  valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_USER}}
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_PASS}}
+                - name: PGDATABASE
+                  valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_DB}}
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  psql -h services-postgres -v ON_ERROR_STOP=1 <<'SQL'
+                  UPDATE eventi_ricevuti SET raw = '{}' WHERE ricevuto_il < now() - interval '90 days' AND raw <> '{}';
+                  DELETE FROM eventi_ricevuti WHERE ricevuto_il < now() - interval '400 days';
+                  SQL
+                  S=$(psql -h services-postgres -Atc "SELECT pg_database_size(current_database())")
+                  echo "dimensione DB: $S byte"
+                  [ "$S" -le 209715200 ] || { echo "DB oltre 200 MB"; exit 1; }
+              volumeMounts:
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: tmp
+              emptyDir: {}
