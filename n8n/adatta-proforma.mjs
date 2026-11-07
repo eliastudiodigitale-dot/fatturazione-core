@@ -107,6 +107,8 @@ export function adatta(wf) {
   delete out.pinData;
   delete out.staticData;
   delete out.versionId;
+  // metadati dell'istanza: all'import n8n li ricrea per il workflow nuovo
+  for (const k of ['createdAt', 'updatedAt', 'isArchived', 'shared', 'triggerCount', 'activeVersionId', 'activeVersion', 'parentFolder']) delete out[k];
   out.name = 'auto_pro-forma (servizio fatturazione)';
   out.active = false;
   const N = Object.fromEntries(out.nodes.map((n) => [n.name, n]));
