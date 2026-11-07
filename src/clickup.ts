@@ -8,7 +8,7 @@ export interface NumeroDoc {
 
 export interface TaskInfo {
   id: string;
-  /** Chiave scritta dal servizio (`<tipo>|<anno>|<numero>`); null per le task create a mano. */
+  /** Chiave scritta dal servizio: una o più `<tipo>|<anno>|<numero>` separate da spazio (proforma e poi fattura sulla stessa task). */
   chiave: string | null;
   /** Numeri che la task occupa: dalla chiave, oppure dai campi storici (Anno + nr-fattura/nr-proforma + checkbox). */
   numeri: NumeroDoc[];
@@ -57,6 +57,14 @@ export function leggiChiave(s: string): NumeroDoc | undefined {
   return { tipo: m[1] as Tipo, anno: Number(m[2]), numero: Number(m[3]) };
 }
 
+/** Tutte le chiavi valide in un campo (separate da spazi, virgole o punto e virgola). */
+export function chiaviIn(s: string): NumeroDoc[] {
+  return s.split(/[\s,;]+/).map(leggiChiave).filter((x): x is NumeroDoc => Boolean(x));
+}
+export function contieneChiave(campo: string | null, chiave: string): boolean {
+  return Boolean(campo && campo.split(/[\s,;]+/).includes(chiave));
+}
+
 /** Elenco senza ripetizioni delle liste da leggere (fatture e proforme possono stare nella stessa lista). */
 export function listeUniche(listId: Record<Tipo, string>): string[] {
   return [...new Set([listId.fattura, listId.proforma])];
@@ -76,8 +84,8 @@ export function infoTask(t: RawTask, campi: CampiClickUp): TaskInfo {
   const val = (id?: string) => (id ? t.custom_fields?.find((c) => c.id === id)?.value : undefined);
   const ch = val(campi.chiave);
   const chiave = typeof ch === 'string' && ch !== '' ? ch : null;
-  const daChiave = chiave ? leggiChiave(chiave) : undefined;
-  if (daChiave) return { id: t.id, chiave, numeri: [daChiave] };
+  const daChiave = chiave ? chiaviIn(chiave) : [];
+  if (daChiave.length) return { id: t.id, chiave, numeri: daChiave };
   const numeri: NumeroDoc[] = [];
   // Anno dal campo Anno; se manca, dalla data del documento o della fattura (le task storiche non sempre lo hanno).
   const annoDa = (v: unknown) => {
@@ -158,9 +166,10 @@ export function creaClickUp(o: { token: string; apiUrl: string; rpm: number; cam
 
   return {
     async cercaPerChiave(listId, chiave) {
-      const filtro = encodeURIComponent(JSON.stringify([{ field_id: o.campi.chiave, operator: '=', value: chiave }]));
+      // Il campo può contenere più chiavi (proforma + fattura): si cerca tra le task con il campo compilato.
+      const filtro = encodeURIComponent(JSON.stringify([{ field_id: o.campi.chiave, operator: 'IS NOT NULL' }]));
       const tasks = await pagine(listId, `&custom_fields=${filtro}`);
-      return tasks.filter((t) => infoTask(t, o.campi).chiave === chiave).map((t) => t.id);
+      return tasks.filter((t) => contieneChiave(infoTask(t, o.campi).chiave, chiave)).map((t) => t.id);
     },
     async creaTask(listId, t) {
       const r = (await richiesta('POST', `/list/${encodeURIComponent(listId)}/task`, {

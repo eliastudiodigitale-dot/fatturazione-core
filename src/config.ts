@@ -24,7 +24,7 @@ export interface Config {
     listId: Record<Tipo, string>;
     campi: CampiClickUp;
   };
-  worker: { interniSec: number; esterniSec: number };
+  worker: { interniSec: number; esterniSec: number; attesaClickupMin: number };
   riconciliazione: { oraRoma: number; riservatoMaxOre: number };
 }
 
@@ -43,6 +43,7 @@ export interface CampiClickUp {
   email?: string;
   ragione?: string;
   progetto?: string;
+  cliente?: string;
   pagata?: string;
   dataIncasso?: string;
   area?: string;
@@ -105,6 +106,8 @@ export function caricaConfig(env: Env = process.env): Config {
     worker: {
       interniSec: int(env, 'WORKER_INTERNI_SEC', 90, 30, 3600),
       esterniSec: int(env, 'WORKER_ESTERNI_SEC', 2700, 60, 86400),
+      // I documenti da n8n hanno la task creata dal workflow (dopo l'approvazione su Telegram): il servizio aspetta.
+      attesaClickupMin: int(env, 'WORKER_ATTESA_CLICKUP_MIN', 45, 0, 1440),
     },
     riconciliazione: {
       oraRoma: int(env, 'RICONCILIAZIONE_ORA', 6, 0, 23),
@@ -159,6 +162,7 @@ export function caricaConfig(env: Env = process.env): Config {
         email: opt(env, 'CLICKUP_CAMPO_EMAIL_ID'),
         ragione: opt(env, 'CLICKUP_CAMPO_RAGIONE_ID'),
         progetto: opt(env, 'CLICKUP_CAMPO_PROGETTO_ID'),
+        cliente: opt(env, 'CLICKUP_CAMPO_CLIENTE_ID'),
         pagata: opt(env, 'CLICKUP_CAMPO_PAGATA_ID'),
         dataIncasso: opt(env, 'CLICKUP_CAMPO_DATA_INCASSO_ID'),
         area: opt(env, 'CLICKUP_CAMPO_AREA_ID'),

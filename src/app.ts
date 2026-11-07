@@ -101,6 +101,21 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
         if (!p || p.tipo !== 'proforma') return reply.code(400).send({ errore: 'rif_proforma: proforma inesistente', codice: 'proforma_inesistente' });
         if (p.stato === 'annullato') return reply.code(400).send({ errore: 'rif_proforma: proforma annullata', codice: 'proforma_annullata' });
       }
+      if (b.auto_versione) {
+        // Prima ref non annullata tra base, |v2, |v3, ...: un nuovo "invia" dopo un NO prende un numero nuovo,
+        // mentre i ritentativi dello stesso invio ritrovano lo stesso documento (stessa ref, stesso numero).
+        const base = b.ref;
+        let scelta: { ref: string; versione?: number } | undefined;
+        for (let v = 1; v <= 99 && !scelta; v++) {
+          const cand = v === 1 ? base : `${base}|v${v}`;
+          const esiste = await perRef(pool, cand);
+          if (!esiste || esiste.stato !== 'annullato') scelta = { ref: cand, versione: v === 1 ? undefined : v };
+        }
+        if (!scelta) return reply.code(409).send({ errore: 'troppi rifacimenti per questo progetto', codice: 'versioni_esaurite' });
+        b.ref = scelta.ref;
+        b.versione = scelta.versione;
+        delete b.auto_versione;
+      }
       const payload = payloadDaBusta(b);
       const d = await riserva(pool, { ref: b.ref, tipo: b.tipo, fonte: b.fonte, business: b.business, payload });
       // Stessa ref = stesso documento. Se i dati sono diversi non si sovrascrive nulla: lo si dice al chiamante.
@@ -188,11 +203,19 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
   app.post<{ Params: { ref: string }; Body: { motivo: string } }>(
     '/v1/documenti/:ref/annulla',
     {
-      preHandler: autentica(['owner']),
+      preHandler: autentica(['owner', 'n8n']),
       schema: { body: { type: 'object', additionalProperties: false, required: ['motivo'], properties: { motivo: { type: 'string', minLength: 5, maxLength: 1000 } } } },
     },
-    async (req) => {
-      const d = await cambiaStato(pool, req.params.ref, 'annullato', { noteAnnullo: req.body.motivo, dettaglio: { da: 'owner' } });
+    async (req, reply) => {
+      // n8n può annullare SOLO una proforma sua (fonte clickup) non ancora in ClickUp (stato riservato):
+      // è il NO all'approvazione su Telegram. Tutto il resto resta riservato al token owner.
+      if (req.chiamante === 'n8n') {
+        const d0 = await perRef(pool, req.params.ref);
+        if (!d0) return reply.code(404).send({ errore: 'documento non trovato' });
+        if (d0.tipo !== 'proforma' || d0.fonte !== 'clickup' || d0.stato !== 'riservato')
+          return reply.code(403).send({ errore: 'n8n può annullare solo proforme proprie non ancora create in ClickUp' });
+      }
+      const d = await cambiaStato(pool, req.params.ref, 'annullato', { noteAnnullo: req.body.motivo, dettaglio: { da: req.chiamante } });
       req.log.info({ ref: d.ref, stato: d.stato }, 'annullo');
       return vistaLeggera(d);
     },

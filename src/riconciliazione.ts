@@ -3,7 +3,7 @@ import type { Documento } from './documenti.js';
 import { cambiaStato } from './documenti.js';
 import type { Eventi } from './eventi.js';
 import { refGc, type GcApi } from './gocardless.js';
-import { chiaveDocumento, leggiChiave, listeUniche } from './clickup.js';
+import { chiaveDocumento, chiaviIn, listeUniche } from './clickup.js';
 import { conLockClickUp, rigeneraTask, type DepsWorker } from './worker.js';
 
 export interface Rapporto {
@@ -81,7 +81,8 @@ export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
       const aMano = new Map<string, string[]>(); // task storiche: numeri scritti a mano
       for (const lista of listeUniche(cu.cfg.listId)) {
         for (const t of await cu.api.elencaTask(lista)) {
-          if (t.chiave && leggiChiave(t.chiave)) perChiave.set(t.chiave, [...(perChiave.get(t.chiave) ?? []), t.id]);
+          const ks = t.chiave ? chiaviIn(t.chiave) : [];
+          if (ks.length) for (const n of ks) { const k = chiaveDocumento(n.tipo, n.anno, n.numero); perChiave.set(k, [...(perChiave.get(k) ?? []), t.id]); }
           else for (const n of t.numeri) { const k = chiaveDocumento(n.tipo, n.anno, n.numero); aMano.set(k, [...(aMano.get(k) ?? []), t.id]); }
         }
       }

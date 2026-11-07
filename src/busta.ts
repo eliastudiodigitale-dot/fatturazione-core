@@ -24,10 +24,12 @@ export interface Busta {
   rata?: string;
   /** Rifacimento di una proforma annullata: la ref prende il suffisso `|v<versione>`. */
   versione?: number;
+  /** Rifare dopo un annullo senza sapere la versione: il servizio usa la prima ref (base, |v2, |v3...) non annullata. */
+  auto_versione?: boolean;
   /** Fattura emessa a partire da una proforma: ref della proforma. */
   rif_proforma?: string;
   note?: string;
-  dati_fonte?: { clickup?: { task_progetto_id: string; list_id_documenti?: string; campo_relationship_id?: string; url_progetto?: string } } & Record<string, unknown>;
+  dati_fonte?: { clickup?: { task_progetto_id: string; list_id_documenti?: string; campo_relationship_id?: string; url_progetto?: string; nome_progetto?: string; cliente_task_id?: string } } & Record<string, unknown>;
 }
 
 const testo = (max: number) => ({ type: 'string', minLength: 1, maxLength: max });
@@ -70,6 +72,7 @@ export const schemaBusta = {
     business: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' }, // es. serrandasu.it
     rata: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,40}$' },
     versione: { type: 'integer', minimum: 2, maximum: 99 },
+    auto_versione: { type: 'boolean' },
     rif_proforma: testo(200),
     note: testo(2000),
     cliente: schemaCliente,
@@ -97,6 +100,8 @@ export const schemaBusta = {
             list_id_documenti: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' },
             campo_relationship_id: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' },
             url_progetto: { type: 'string', maxLength: 500, pattern: '^https://' },
+            nome_progetto: testo(200),
+            cliente_task_id: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' },
           },
         },
       },
@@ -141,6 +146,7 @@ export function controllaBusta(b: Busta, chiamante: Chiamante): string | undefin
   }
   if (tot <= 0) return 'totale del documento non positivo (le correzioni si fanno con nota di credito)';
   if (b.rif_proforma && b.tipo !== 'fattura') return 'rif_proforma ammesso solo su una fattura';
+  if (b.auto_versione && b.versione) return 'usare auto_versione oppure versione, non entrambi';
   return undefined;
 }
 

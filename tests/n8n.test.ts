@@ -1,5 +1,4 @@
 // Workflow n8n: la logica dei nodi Code produce buste che il servizio vero accetta, e reagisce bene agli esiti.
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { AUTH, admin, costruisci, poolApp, svuota } from './helpers.js';
@@ -13,9 +12,14 @@ beforeEach(svuota);
 
 const src = readFileSync(new URL('../n8n/prepara-busta.js', import.meta.url), 'utf8');
 const L = new Function(`${src}; return { daEmettere, costruisciBusta, esitoRisposta, valoreCampo, clienteDaContatto, scomponiIndirizzo };`)() as Record<string, (...a: unknown[]) => any>;
-execFileSync(process.execPath, [new URL('../n8n/genera-workflow.mjs', import.meta.url).pathname]);
-const wf = JSON.parse(readFileSync(new URL('../n8n/fatture-da-clickup.json', import.meta.url), 'utf8'));
-const C = new Function(wf.nodes.find((n: { name: string }) => n.name === 'Configurazione').parameters.jsCode)()[0].json;
+// Configurazione delle funzioni (come nel nodo "Busta per il servizio", più i nomi dei campi progetto)
+const C = {
+  businessPerLista: { '901517931489': 'gazzolaelia.it', '901521040352': 'gazzolaelia.it' },
+  aliasBusiness: { 'studio digitale di elia gazzola': 'gazzolaelia.it' },
+  campi: { emetti: ['Emetti documento'], importo: ['Importo documento'], cliente: ['cliente'], rata: ['Rata'], versione: ['Versione documento'], descrizione: ['Descrizione documento'], attivita: ['Business'], segnaProforma: ['pf-creata'], segnaFattura: ['# fattura'] },
+  campiCliente: { ragione_sociale: ['Azienda'], nome: ['nome'], cognome: ['Cognome'], email: ['email lavoro'], pec: ['pec'], telefono: ['cellulare', 'telefono'], partita_iva: ['P.iva'], codice_fiscale: ['C.F.'], codice_destinatario: ['sdi'], indirizzo_unico: ['Indirizzo'], via: [], cap: [], citta: [], provincia: [], paese: [] },
+  campoProgettoDocumenti: 'ce95ab64-a43b-4a75-bc93-ec8a4cbb8410',
+};
 
 // Task come le restituisce l'API ClickUp (menu = orderindex, valuta = stringa, relazione = array di task).
 const BUSINESS = { id: '46e7275b', name: 'Business', type: 'drop_down', type_config: { options: [{ id: 'b0', name: 'STUDIO DIGITALE di Elia Gazzola', orderindex: 0 }, { id: 'b1', name: 'reti.gazzolaelia.it', orderindex: 1 }, { id: 'b2', name: 'serrandasu.it', orderindex: 2 }, { id: 'b9', name: 'Altro marchio', orderindex: 9 }] } };
@@ -51,19 +55,7 @@ const contatto = {
   ],
 };
 
-describe('workflow n8n "Fatture da ClickUp"', () => {
-  it('il JSON generato è coerente: nodi collegati esistono, i nodi Code compilano', () => {
-    const nomi = new Set(wf.nodes.map((n: { name: string }) => n.name));
-    for (const [da, c] of Object.entries(wf.connections as Record<string, { main: { node: string }[][] }>)) {
-      expect(nomi.has(da)).toBe(true);
-      for (const uscita of c.main) for (const v of uscita) expect(nomi.has(v.node)).toBe(true);
-    }
-    for (const n of wf.nodes.filter((n: { type: string }) => n.type === 'n8n-nodes-base.code'))
-      expect(() => new Function('$input', '$json', '$', n.parameters.jsCode)).not.toThrow();
-    expect(wf.active).toBe(false);
-    expect(JSON.stringify(wf)).not.toMatch(/pk_|Bearer [a-f0-9]{20}/);
-  });
-
+describe('funzioni dei nodi n8n (prepara-busta.js)', () => {
   it('progetto completo: busta accettata dal servizio, stesso numero ai giri successivi', async () => {
     const sel = L.daEmettere(progetto(), C);
     expect(sel).toMatchObject({ ok: true, tipo: 'proforma', importo: 1500.5, business: 'gazzolaelia.it', rata: 'unica', versione: null, segna: { proforma: '5cac5d6d', fattura: '4a56b9d1' } });
@@ -97,7 +89,7 @@ describe('workflow n8n "Fatture da ClickUp"', () => {
   it('dati mancanti: nessuna chiamata al servizio, commento con cosa manca', () => {
     expect(L.daEmettere(progetto({ emetti: null }), C)).toBeNull();
     expect(L.daEmettere(progetto({ importo: '0' }), C)).toMatchObject({ ok: false, errore: expect.stringMatching(/Importo documento/) });
-    expect(L.daEmettere(progetto({ clienti: [] }), C)).toMatchObject({ ok: false, errore: expect.stringMatching(/Cliente/) });
+    expect(L.daEmettere(progetto({ clienti: [] }), C)).toMatchObject({ ok: false, errore: expect.stringMatching(/cliente/i) });
     expect(L.daEmettere(progetto({ lista: 'altra' }), C)).toMatchObject({ ok: false, errore: expect.stringMatching(/attività sconosciuta/) });
     expect(L.daEmettere(progetto({ business: 9 }), C)).toMatchObject({ ok: false, errore: expect.stringMatching(/Altro marchio/) });
   });

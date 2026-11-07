@@ -92,7 +92,10 @@ export function taskDaDocumento(d: Documento, cfg: DepsWorker['cfg'], campiLista
     else notif?.anomalia('clickup_area_sconosciuta', { business: d.business, azione: 'aggiungere l\'opzione nel menu AREA' });
   }
   if (c.metodo && METODO_PER_FONTE[d.fonte]) metti(c.metodo, opzionePerNome(campiLista.find((x) => x.id === c.metodo), METODO_PER_FONTE[d.fonte]!));
-  return { nome: `${etichetta[d.tipo]} ${d.numero}/${d.anno}${nomeCliente ? ` - ${nomeCliente}` : ''}`, descrizione: descrizione.join('\n'), campi };
+  // Stesso nome che usa il flusso n8n di Elia ("F-<progetto>-<anno>") quando il progetto è noto.
+  const nomeProgetto = (d.payload.dati_fonte as { clickup?: { nome_progetto?: string } } | undefined)?.clickup?.nome_progetto;
+  const nome = nomeProgetto ? `F-${nomeProgetto}-${d.anno}` : `${etichetta[d.tipo]} ${d.numero}/${d.anno}${nomeCliente ? ` - ${nomeCliente}` : ''}`;
+  return { nome, descrizione: descrizione.join('\n'), campi };
 }
 
 /**
@@ -116,6 +119,8 @@ export async function assicuraTask(deps: DepsWorker, d: Documento): Promise<stri
   const ck = (d.payload.dati_fonte as { clickup?: { task_progetto_id?: string; campo_relationship_id?: string } } | undefined)?.clickup;
   const rel = ck?.campo_relationship_id ?? deps.cfg.campi.progetto;
   if (ck?.task_progetto_id && rel) await deps.api.collegaProgetto(id, rel, ck.task_progetto_id);
+  const cli = (ck as { cliente_task_id?: string } | undefined)?.cliente_task_id;
+  if (cli && deps.cfg.campi.cliente) await deps.api.collegaProgetto(id, deps.cfg.campi.cliente, cli);
   return id;
 }
 
@@ -123,18 +128,20 @@ export async function assicuraTask(deps: DepsWorker, d: Documento): Promise<stri
  * Un giro del worker: fotografia dei documenti 'riservato' con data_riserva precedente all'avvio del giro.
  * Se ClickUp fallisce ci si ferma: i documenti restano 'riservato' e il giro dopo li riprende con lo stesso numero.
  */
-export async function giroWorker(deps: DepsWorker, fonti: string[]): Promise<{ creati: number } | 'occupato'> {
+export async function giroWorker(deps: DepsWorker, fonti: string[], attesaClickupMin = 0): Promise<{ creati: number } | 'occupato'> {
   return conLockClickUp(deps.pool, async () => {
     const r = await deps.pool.query<Documento>(
       `SELECT * FROM documenti WHERE stato = 'riservato' AND data_riserva < now() AND fonte = ANY($1)
+         AND (fonte <> 'clickup' OR data_riserva < now() - make_interval(mins => $2))
        ORDER BY anno, tipo, numero`,
-      [fonti],
+      [fonti, attesaClickupMin],
     );
     let creati = 0;
     for (const d of r.rows) {
       try {
         const id = await assicuraTask(deps, d);
         if (!id) continue;
+        if (d.fonte === 'clickup' && attesaClickupMin > 0) deps.notif.anomalia('clickup_task_dal_servizio', { ref: d.ref, azione: 'il workflow n8n non ha confermato: controllare che la proforma sia stata inviata' });
         await cambiaStato(deps.pool, d.ref, 'creato', { clickupTaskId: id, dettaglio: { clickup_task_id: id } });
         creati++;
       } catch (e) {

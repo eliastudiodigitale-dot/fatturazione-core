@@ -72,7 +72,7 @@ ogni(60, 'controllo', async () => {
 });
 ogni(300, 'ripresa eventi', () => eventi.riprendi());
 if (depsWorker) {
-  ogni(cfg.worker.interniSec, 'worker interni', async () => !blocco.bloccato && giroWorker(depsWorker, FONTI_INTERNE));
+  ogni(cfg.worker.interniSec, 'worker interni', async () => !blocco.bloccato && giroWorker(depsWorker, FONTI_INTERNE, cfg.worker.attesaClickupMin));
   ogni(cfg.worker.esterniSec, 'worker esterni', async () => !blocco.bloccato && giroWorker(depsWorker, FONTI_ESTERNE));
 }
 let ultimoGiorno = '';

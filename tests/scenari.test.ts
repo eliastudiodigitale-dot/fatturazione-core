@@ -490,3 +490,73 @@ describe('Configurazione', () => {
     expect(cfgTest().clickup).toBeDefined();
   });
 });
+
+describe('Integrazione con il flusso n8n "auto_pro-forma" (numero prima dell\'OK, task creata dal workflow)', () => {
+  const busta = (o: Record<string, unknown> = {}) => ({ ...bustaClickup('PRJ-A', { tipo: 'proforma' }), auto_versione: true, ...o });
+  const annulla = (app: Awaited<ReturnType<typeof costruisci>>['app'], ref: string, h = AUTH.n8n) =>
+    app.inject({ method: 'POST', url: `/v1/documenti/${enc(ref)}/annulla`, headers: h, payload: { motivo: 'NO su Telegram' } });
+
+  it('auto_versione: ritentativi = stesso numero; dopo un NO il nuovo invio prende il numero successivo', async () => {
+    const { app } = await costruisci({ pool });
+    const r1 = await post(app, busta());
+    const r1b = await post(app, busta()); // n8n riprova (Gotenberg giù, ecc.)
+    expect([r1.json().numero, r1b.json().numero, r1.json().ref]).toEqual([1, 1, 'PRJ-A|proforma|unica']);
+    expect((await annulla(app, r1.json().ref)).statusCode).toBe(200); // NO all'approvazione
+    const r2 = await post(app, busta());
+    expect(r2.json()).toMatchObject({ numero: 2, ref: 'PRJ-A|proforma|unica|v2' });
+    await annulla(app, r2.json().ref);
+    expect((await post(app, busta())).json()).toMatchObject({ numero: 3, ref: 'PRJ-A|proforma|unica|v3' });
+    await app.close();
+  });
+
+  it('n8n può annullare solo proforme proprie ancora "riservato"; mai fatture, mai dopo la task', async () => {
+    const { app } = await costruisci({ pool });
+    const p = (await post(app, busta())).json();
+    await app.inject({ method: 'POST', url: `/v1/documenti/${enc(p.ref)}/stato`, headers: AUTH.n8n, payload: { a_stato: 'creato', clickup_task_id: 't1' } });
+    expect((await annulla(app, p.ref)).statusCode).toBe(403); // già in ClickUp: solo owner
+    expect((await annulla(app, p.ref, AUTH.owner)).statusCode).toBe(200);
+    const f = (await post(app, bustaClickup('PRJ-F'))).json();
+    expect((await annulla(app, f.ref)).statusCode).toBe(403);
+    const d = (await post(app, { ...bustaClickup('X'), fonte: 'dashboard', ref: 'dashboard|X|proforma', tipo: 'proforma', dati_fonte: undefined }, AUTH.dashboard)).json();
+    expect((await annulla(app, d.ref)).statusCode).toBe(403); // non è di n8n
+    await app.close();
+  });
+
+  it('il worker lascia 45 minuti al workflow; poi crea lui la task (nome come il flusso) e avvisa', async () => {
+    const { app } = await costruisci({ pool });
+    const dfc = { task_progetto_id: 'PRJ-W', campo_relationship_id: 'campo-rel', nome_progetto: 'Villa Rossi', cliente_task_id: 'CLI1' };
+    await post(app, { ...busta(), ref: 'PRJ-W|proforma|unica', dati_fonte: { clickup: dfc } });
+    const cu = new ClickUpFinto();
+    const notif = notificheFinte();
+    const deps = { pool, api: cu, cfg: cfgTest({ CLICKUP_CAMPO_CLIENTE_ID: 'campo-cliente' }).clickup!, log: logMuto, notif };
+    expect(await giroWorker(deps, FONTI_INTERNE, 45)).toEqual({ creati: 0 });
+    await admin.query(`UPDATE documenti SET data_riserva = now() - interval '46 minutes'`);
+    expect(await giroWorker(deps, FONTI_INTERNE, 45)).toEqual({ creati: 1 });
+    const t = [...cu.task.values()][0]!;
+    expect(t.t!.nome).toBe(`F-Villa Rossi-${ANNO}`);
+    expect(t.collegati).toEqual(['PRJ-W', 'CLI1']);
+    expect(notif.lista.map((n) => n.codice)).toEqual(['clickup_task_dal_servizio']);
+    await app.close();
+  });
+
+  it('il workflow crea la task e conferma: il worker non fa nulla, nessun doppione', async () => {
+    const { app } = await costruisci({ pool });
+    const p = (await post(app, busta())).json();
+    const cu = new ClickUpFinto();
+    const id = await cu.creaTask('lista-proforme', { nome: 'F-x-2026', descrizione: '', campi: [{ id: 'campo-chiave', value: `proforma|${p.anno}|${p.numero}` }] });
+    await app.inject({ method: 'POST', url: `/v1/documenti/${enc(p.ref)}/stato`, headers: AUTH.n8n, payload: { a_stato: 'creato', clickup_task_id: id } });
+    await admin.query(`UPDATE documenti SET data_riserva = now() - interval '2 hours'`);
+    expect(await giroWorker({ pool, api: cu, cfg: cfgTest().clickup!, log: logMuto, notif: notificheFinte() }, FONTI_INTERNE, 45)).toEqual({ creati: 0 });
+    expect(cu.task.size).toBe(1);
+    await app.close();
+  });
+
+  it('una task con proforma e poi fattura: entrambe le chiavi nello stesso campo', async () => {
+    const { infoTask, contieneChiave } = await import('../src/clickup.js');
+    const campi = cfgTest().clickup!.campi;
+    const i = infoTask({ id: 'x', custom_fields: [{ id: 'campo-chiave', value: 'proforma|2026|13 fattura|2026|38' }] }, campi);
+    expect(i.numeri).toEqual([{ tipo: 'proforma', anno: 2026, numero: 13 }, { tipo: 'fattura', anno: 2026, numero: 38 }]);
+    expect(contieneChiave(i.chiave, 'fattura|2026|38')).toBe(true);
+    expect(contieneChiave(i.chiave, 'fattura|2026|3')).toBe(false);
+  });
+});

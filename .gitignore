@@ -6,3 +6,5 @@ dist/
 .env
 .env.*
 !.env.example
+# flusso n8n generato dall'export di Elia (contiene i suoi dati aziendali): si rigenera, non si committa
+n8n/auto-proforma-servizio.json

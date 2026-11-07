@@ -38,5 +38,8 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #31 | 2026-11-07 | La fattura nasce dalla proforma: stessa task in "proforme e fatture" (nr-fattura e t-fattura sulla task della proforma), non una task nuova | flusso attuale di Elia | utente
 #32 | 2026-11-07 | La proforma parte dal pulsante "inviapf" del progetto, come oggi | flusso attuale di Elia | utente
 #33 | 2026-11-07 | Causale e righe del documento calcolate come nel flusso attuale (auto_pro-forma +subtasks), da replicare dopo ricognizione-4 | flusso attuale di Elia | utente
+#34 | 2026-11-07 | Proforme dal flusso n8n: il numero si prende PRIMA dell'approvazione su Telegram (deve stare nel PDF); con NO, tempo scaduto o email mancante il flusso annulla la proforma (resta un salto, ammesso per le proforme). Per questo il token n8n può annullare solo proforme proprie (fonte clickup) ancora in stato riservato | scelta di Elia; permesso minimo per realizzarla | utente (permesso n8n: agente, da confermare)
+#35 | 2026-11-07 | La task in "proforme e fatture" la crea il flusso n8n come oggi (nome F-progetto-anno, stato "pf inviata") con la Chiave documento, e conferma al servizio; il servizio la crea solo se dopo 45 minuti manca (WORKER_ATTESA_CLICKUP_MIN) | scelta di Elia | utente
+#36 | 2026-11-07 | La fattura elettronica oggi si emette con un programma/app esterno: il numero da usare lì sarà quello del servizio | risposta di Elia (Fase 2: integrazione SDI) | utente
 
 Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.

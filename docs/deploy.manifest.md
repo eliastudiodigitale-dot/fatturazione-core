@@ -18,7 +18,7 @@ Descrive ciò che il repo documenta al 2026-11-07. Il servizio **non è mai stat
 | Creazione Secret | `scripts/vps/crea-secret.sh api\|offsite` | Interattivo sul VPS: genera i 3 token, chiede le chiavi senza mostrarle |
 | Backup fuori VPS | `k8s/backup-offsite-cronjob.yaml` | 04:10, copia cifrata (rclone crypt) su Backblaze B2 (decisione #22); NON applicato |
 | Riallineamento contatore (Job) | `scripts/rilascio/riallinea.sh <anno> <tipo> <ultimo>` | Prima della prima emissione: porta il contatore oltre i numeri già usati a mano (ClickUp, cassetto fiscale) |
-| Workflow n8n | `n8n/fatture-da-clickup.json` (generato da `n8n/genera-workflow.mjs`, logica in `n8n/prepara-busta.js`) | Ogni 2 minuti legge i progetti ClickUp con "Emetti documento", chiama `POST /v1/documenti`, commenta la task. Si importa a mano in n8n, credenziali "ClickUp (token)" e "fatturazione-core" |
+| Workflow n8n proforme | `n8n/adatta-proforma.mjs` (+ `n8n/prepara-busta.js`) genera `n8n/auto-proforma-servizio.json` (non committato) dall'export del flusso attuale (`scripts/vps/esporta-flusso-proforma.sh`) | Il flusso "auto_pro-forma" di Elia con il numero preso dal servizio; si importa spento come workflow NUOVO (il vecchio resta per il rollback). Credenziale nuova "fatturazione-core" (Header Auth) |
 | Ricognizione 3 | `scripts/vps/ricognizione-3.sh` | Sola lettura: campi di progetti e contatti, workflow n8n esistenti su fatture |
 | Ricognizione 2 | `scripts/vps/ricognizione-2.sh` | Sola lettura: numeri già usati in ClickUp, opzioni AREA/metodo, Traefik/TLS, DNS |
 | Script di rilascio | `scripts/rilascio/migra.sh`, `rilascia.sh`, `verifica.sh` | Dal Mac via SSH: migrazione, build+import+apply, stato. Mai provati sul VPS [DA VERIFICARE] |
