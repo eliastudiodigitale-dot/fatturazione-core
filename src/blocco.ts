@@ -50,7 +50,11 @@ export async function controlloContatori(
       for (const t of await clickup.api.elencaTask(lista)) for (const c of t.numeri) su(`${c.anno}|${c.tipo}`, c.numero);
     }
   }
+  // Contano solo l'anno in corso e i successivi (Europe/Rome): il servizio numera sempre nell'anno della riserva,
+  // quindi i numeri a mano degli anni passati non possono mai scontrarsi con quelli nuovi.
+  const annoCorrente = Number(new Intl.DateTimeFormat('en', { timeZone: 'Europe/Rome', year: 'numeric' }).format(new Date()));
   for (const [k, m] of massimi) {
+    if (Number(k.split('|')[0]) < annoCorrente) continue;
     const u = cont.get(k) ?? 0;
     if (u < m) problemi.push(`contatore ${k} = ${u} < massimo trovato ${m}`);
   }

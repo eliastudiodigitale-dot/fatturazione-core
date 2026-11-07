@@ -25,7 +25,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: app
-          image: fatturazione-core:0.1.1   # importata in k3s, nessun registry (decisione #23); tag fisso, mai latest
+          image: fatturazione-core:0.1.2   # importata in k3s, nessun registry (decisione #23); tag fisso, mai latest
           imagePullPolicy: Never
           ports:
             - {name: http, containerPort: 8080}

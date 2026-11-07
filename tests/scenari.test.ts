@@ -560,3 +560,22 @@ describe('Integrazione con il flusso n8n "auto_pro-forma" (numero prima dell\'OK
     expect(contieneChiave(i.chiave, 'fattura|2026|3')).toBe(false);
   });
 });
+
+describe('Avvio con lo storico reale (numeri a mano 2025 e 2026, contatore riallineato)', () => {
+  it('i numeri a mano degli anni passati non bloccano; il riallineamento non produce falsi buchi', async () => {
+    const { controlloContatori } = await import('../src/blocco.js');
+    const cu = new ClickUpFinto();
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'fattura', anno: ANNO - 1, numero: 7 }, { tipo: 'proforma', anno: ANNO - 1, numero: 7 }]);
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'fattura', anno: ANNO, numero: 8 }, { tipo: 'proforma', anno: ANNO, numero: 15 }]);
+    const lid = { fattura: 'lista-unica', proforma: 'lista-unica' };
+    // contatore dell'anno in corso indietro: blocca (e l'anno scorso non viene nominato)
+    expect(await controlloContatori(pool, { api: cu, listId: lid })).toEqual([`contatore ${ANNO}|fattura = 0 < massimo trovato 8`, `contatore ${ANNO}|proforma = 0 < massimo trovato 15`]);
+    await admin.query(`INSERT INTO contatori(anno, tipo, ultimo) VALUES ($1, 'fattura', 8), ($1, 'proforma', 15)`, [ANNO]);
+    expect(await controlloContatori(pool, { api: cu, listId: lid })).toEqual([]);
+    const { app } = await costruisci({ pool });
+    expect((await post(app, bustaClickup('N1', { tipo: 'proforma' }))).json().numero).toBe(16);
+    const r = await riconcilia({ pool, notif: notificheFinte(), log: logMuto, riservatoMaxOre: 24 });
+    expect(r.buchi).toEqual([]); // 1..15 sono a mano: non sono buchi
+    await app.close();
+  });
+});

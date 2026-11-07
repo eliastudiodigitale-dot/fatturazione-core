@@ -38,8 +38,11 @@ export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
   // 1. Buchi nella sequenza e contatore
   const cont = (await pool.query<{ anno: number; tipo: Tipo; ultimo: number }>('SELECT anno, tipo, ultimo FROM contatori')).rows;
   for (const c of cont) {
+    // I buchi si cercano dal primo numero emesso dal servizio: quelli prima sono i numeri a mano (riallineamento),
+    // che stanno in ClickUp e nel cassetto fiscale, non qui.
     const r = await pool.query<{ n: number }>(
-      `SELECT g AS n FROM generate_series(1, $3::int) g
+      `SELECT g AS n FROM generate_series(
+         (SELECT min(numero) FROM documenti WHERE anno = $1 AND tipo = $2), $3::int) g
        WHERE NOT EXISTS (SELECT 1 FROM documenti d WHERE d.anno = $1 AND d.tipo = $2 AND d.numero = g) LIMIT 50`,
       [c.anno, c.tipo, c.ultimo],
     );
