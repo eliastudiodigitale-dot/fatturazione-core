@@ -21,6 +21,7 @@ function stripeFinto(o: { piHaFattura?: boolean } = {}): StripeApi {
     piHaFattura: async () => o.piHaFattura ?? false,
     righeFattura: async () => [{ descrizione: 'Abbonamento', centesimi: 2900 }],
     clienteDaCharge: async () => ({ nome: 'Cliente Stripe', email: 'c@example.com' }),
+    businessDaProdotto: async () => undefined,
   };
 }
 function firmaStripe(body: string) {

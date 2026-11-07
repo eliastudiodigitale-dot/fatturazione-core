@@ -78,26 +78,40 @@ metadata:
   name: fatturazione-core-config
   namespace: platform
 data:
+  # Valori dalla ricognizione del VPS e dal Centro Fatturazione (2026-11-07).
   PG_HOST: services-postgres
   PG_PORT: "5432"
-  PG_SSL: "DA_DEFINIRE"            # disable | require | verify-full  [DA VERIFICARE se services-postgres ha SSL]; valore non valido = il pod non parte
-                                   # con verify-full serve anche PG_CA_FILE (CA montata da un Secret) [DA VERIFICARE]
+  PG_SSL: "disable"                # services-postgres ha ssl=off (ricognizione); traffico confinato dalla NetworkPolicy (decisione #17)
   FORZA_BLOCCO: "false"            # "true" dopo un ripristino del DB (SPEC 7)
   RATE_LIMIT_PER_MIN: "120"
   BODY_LIMIT: "65536"
-  PAGAMENTI_TIPO_DOCUMENTO: "fattura"   # decisione #15
-  STRIPE_LIVEMODE: "true"          # in produzione gli eventi Stripe di test vengono ignorati
-  STRIPE_BUSINESS_PREDEFINITO: ""  # business se l'evento non ha metadata.business (es. un account Stripe = un business)
-  GC_BUSINESS_PREDEFINITO: ""      # idem per GoCardless
-  TELEGRAM_CHAT_ID: ""             # chat che riceve le anomalie (il token del bot sta nel Secret)
-  GC_TRIGGER_ACTION: ""            # [DA DECIDERE col commercialista] confirmed | paid_out; vuoto = GoCardless spento
-  CLICKUP_LIST_ID_FATTURA: ""      # [DA DEFINIRE]
-  CLICKUP_LIST_ID_PROFORMA: ""     # [DA DEFINIRE]
-  CLICKUP_CAMPO_CHIAVE_ID: ""      # [DA DEFINIRE] campo testo "chiave" (<tipo>|<anno>|<numero>)
-  CLICKUP_CAMPO_NUMERO_ID: ""      # facoltativo
-  CLICKUP_CAMPO_BUSINESS_ID: ""    # facoltativo
-  CLICKUP_CAMPO_RATA_ID: ""        # facoltativo
-  CLICKUP_RPM: "100"               # [DA VERIFICARE] limite reale del workspace (100 o 1000)
+  PAGAMENTI_TIPO_DOCUMENTO: "fattura"            # decisione #15
+  STRIPE_LIVEMODE: "true"                        # gli eventi Stripe di test vengono ignorati
+  STRIPE_BUSINESS_PREDEFINITO: ""                # più attività su Stripe: metadata "business" sul prodotto (decisione #28)
+  GC_TRIGGER_ACTION: "paid_out"                  # decisione #26
+  GC_BUSINESS_PREDEFINITO: "reti.gazzolaelia.it" # unica attività su GoCardless (decisione #27)
+  TELEGRAM_CHAT_ID: "21500777"
+  # ClickUp: lista unica "proforme e fatture" (spazio P.Iva > Documenti) e i suoi campi esistenti
+  CLICKUP_LIST_ID_FATTURA: "901518874514"
+  CLICKUP_LIST_ID_PROFORMA: "901518874514"
+  CLICKUP_CAMPO_CHIAVE_ID: ""      # [DA LEGGERE] ID del campo "Chiave documento" (ricognizione-2). Finché è vuoto il pod NON parte.
+  CLICKUP_CAMPO_ANNO_ID: "9f151028-e075-474c-b81f-caea96e7bdcf"            # Anno
+  CLICKUP_CAMPO_NUMERO_FATTURA_ID: "b6cc96f9-c1a3-4254-b04c-19ace0b93955"  # nr-fattura
+  CLICKUP_CAMPO_NUMERO_PROFORMA_ID: "c728c9f3-10c2-4e05-8fcd-055a3d1a09a9" # nr-proforma
+  CLICKUP_CAMPO_FLAG_FATTURA_ID: "5a271c02-0ddd-4d76-8f68-b8c007705558"    # fattura (checkbox)
+  CLICKUP_CAMPO_FLAG_PROFORMA_ID: "29fe2276-c5ee-4189-8c0c-f223a9b52c75"   # pro-forma (checkbox)
+  CLICKUP_CAMPO_TOTALE_FATTURA_ID: "128a2f38-e474-455d-b8bd-7381c77e4e2e"  # t-fattura
+  CLICKUP_CAMPO_TOTALE_PROFORMA_ID: "b7fd17d7-2d75-454d-adae-44e709d367e9" # t-proforma
+  CLICKUP_CAMPO_DATA_DOCUMENTO_ID: "f85f9bd7-a471-489e-a0ae-83072e96b645"  # d-documento
+  CLICKUP_CAMPO_DATA_FATTURA_ID: "8a04a5bf-7819-4ef7-9f11-8dc287dd5945"    # d-fattura
+  CLICKUP_CAMPO_EMAIL_ID: "c5a096ff-7dba-480d-a502-eea693d827ad"           # emailcliente
+  CLICKUP_CAMPO_RAGIONE_ID: "25ff92cf-cb5f-4a42-9942-fb511af9191c"         # ragione
+  CLICKUP_CAMPO_PROGETTO_ID: "ce95ab64-a43b-4a75-bc93-ec8a4cbb8410"        # progetto-rif (relationship)
+  CLICKUP_CAMPO_PAGATA_ID: "528f9b5b-2556-4677-bd6c-f4131a34db46"          # pagata (Stripe/GoCardless)
+  CLICKUP_CAMPO_DATA_INCASSO_ID: "c7b2c204-69b1-4b83-b576-03f53944ff32"    # d-incasso
+  CLICKUP_CAMPO_AREA_ID: "dceab1e6-72dc-4f34-bf13-a0e85ca4c6f2"            # AREA (opzione scelta per nome dell'attività)
+  CLICKUP_CAMPO_METODO_ID: "b82c93df-8c62-4890-83c6-de430f82c598"          # metodo-pag (Stripe / GoCardless per nome)
+  CLICKUP_RPM: "40"                # limite del token 100/min, condiviso con archportal002 (stesso token): ne usiamo meno della metà
   WORKER_INTERNI_SEC: "90"
   WORKER_ESTERNI_SEC: "2700"
   RICONCILIAZIONE_ORA: "6"

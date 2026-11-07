@@ -3,13 +3,15 @@ import type { Documento } from './documenti.js';
 import { cambiaStato } from './documenti.js';
 import type { Eventi } from './eventi.js';
 import { refGc, type GcApi } from './gocardless.js';
-import { chiaveDocumento, leggiChiave } from './clickup.js';
+import { chiaveDocumento, leggiChiave, listeUniche } from './clickup.js';
 import { conLockClickUp, rigeneraTask, type DepsWorker } from './worker.js';
 
 export interface Rapporto {
   buchi: string[];
   divergenzeContatore: string[];
   taskDoppie: string[];
+  /** Numeri presenti sia in task fatte a mano sia in task del servizio. */
+  collisioni: string[];
   taskOrfane: string[];
   rigenerate: string[];
   allineati: string[];
@@ -30,7 +32,7 @@ export interface DepsRiconciliazione {
 
 /** Confronto DB <-> ClickUp (e GoCardless). Allinea solo gli stati; mai correzioni dei numeri. */
 export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
-  const R: Rapporto = { buchi: [], divergenzeContatore: [], taskDoppie: [], taskOrfane: [], rigenerate: [], allineati: [], riservatiVecchi: [], eventiInSospeso: 0, gcRecuperati: [], errori: [] };
+  const R: Rapporto = { buchi: [], divergenzeContatore: [], taskDoppie: [], collisioni: [], taskOrfane: [], rigenerate: [], allineati: [], riservatiVecchi: [], eventiInSospeso: 0, gcRecuperati: [], errori: [] };
   const { pool } = deps;
 
   // 1. Buchi nella sequenza e contatore
@@ -75,14 +77,20 @@ export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
   if (deps.clickup) {
     const cu = deps.clickup;
     const esito = await conLockClickUp(pool, async () => {
-      const perChiave = new Map<string, string[]>();
-      for (const tipo of ['fattura', 'proforma'] as const) {
-        for (const t of await cu.api.elencaTask(cu.cfg.listId[tipo])) {
-          if (!t.chiave || !leggiChiave(t.chiave)) continue;
-          perChiave.set(t.chiave, [...(perChiave.get(t.chiave) ?? []), t.id]);
+      const perChiave = new Map<string, string[]>(); // task create dal servizio
+      const aMano = new Map<string, string[]>(); // task storiche: numeri scritti a mano
+      for (const lista of listeUniche(cu.cfg.listId)) {
+        for (const t of await cu.api.elencaTask(lista)) {
+          if (t.chiave && leggiChiave(t.chiave)) perChiave.set(t.chiave, [...(perChiave.get(t.chiave) ?? []), t.id]);
+          else for (const n of t.numeri) { const k = chiaveDocumento(n.tipo, n.anno, n.numero); aMano.set(k, [...(aMano.get(k) ?? []), t.id]); }
         }
       }
       for (const [k, ids] of perChiave) if (ids.length > 1) R.taskDoppie.push(`${k}: ${ids.join(',')}`);
+      for (const [k, ids] of aMano) {
+        if (ids.length > 1) R.taskDoppie.push(`${k} (a mano): ${ids.join(',')}`);
+        // Un numero usato a mano E dal servizio: doppione fiscale. Non si corregge da soli.
+        if (perChiave.has(k)) R.collisioni.push(k);
+      }
 
       const docs = (await pool.query<Documento>(`SELECT * FROM documenti WHERE stato IN ('riservato','creato','inviato_sdi','consegnato','annullato') ORDER BY id`)).rows;
       const noti = new Set<string>();
@@ -109,12 +117,13 @@ export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
     if (esito === 'occupato') R.errori.push('clickup: worker in corso, confronto saltato');
   }
 
-  const anomalie = R.buchi.length + R.divergenzeContatore.length + R.taskDoppie.length + R.taskOrfane.length + R.riservatiVecchi.length + R.eventiInSospeso + R.errori.length;
+  const anomalie = R.buchi.length + R.divergenzeContatore.length + R.taskDoppie.length + R.collisioni.length + R.taskOrfane.length + R.riservatiVecchi.length + R.eventiInSospeso + R.errori.length;
   if (anomalie > 0 || R.rigenerate.length || R.gcRecuperati.length) {
     deps.notif.anomalia('riconciliazione', {
       buchi: R.buchi.length,
       divergenze_contatore: R.divergenzeContatore.length,
       task_doppie: R.taskDoppie.length,
+      numeri_doppi_mano_servizio: R.collisioni.length,
       task_orfane: R.taskOrfane.length,
       riservati_vecchi: R.riservatiVecchi.length,
       eventi_in_sospeso: R.eventiInSospeso,

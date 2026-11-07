@@ -1,6 +1,6 @@
 # Default deny per il pod fatturazione-core, poi solo il necessario (SPEC 8). NON applicato.
-# [DA VERIFICARE] le etichette reali: namespace dell'ingress controller (k3s: traefik in kube-system),
-# label dei pod n8n e di services-postgres (kubectl -n platform get pods --show-labels).
+# Etichette verificate con la ricognizione del 2026-11-07: traefik (kube-system) app.kubernetes.io/name=traefik,
+# n8n app=n8n, services-postgres app=services-postgres.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,9 +15,9 @@ spec:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: kube-system}
           podSelector:
-            matchLabels: {app.kubernetes.io/name: traefik}   # [DA VERIFICARE]
+            matchLabels: {app.kubernetes.io/name: traefik}
         - podSelector:
-            matchLabels: {app: n8n}                          # [DA VERIFICARE]
+            matchLabels: {app: n8n}                       
       ports:
         - {protocol: TCP, port: 8080}
   egress:
@@ -31,7 +31,7 @@ spec:
         - {protocol: TCP, port: 53}
     - to:
         - podSelector:
-            matchLabels: {app: services-postgres}            # [DA VERIFICARE]
+            matchLabels: {app: services-postgres}         
       ports:
         - {protocol: TCP, port: 5432}
     # NetworkPolicy standard non filtra per nome host: api.clickup.com, api.stripe.com, api.gocardless.com

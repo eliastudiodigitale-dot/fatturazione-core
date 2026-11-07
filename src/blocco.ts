@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import type { Config, Tipo } from './config.js';
-import { leggiChiave, type ClickUpApi } from './clickup.js';
+import { listeUniche, type ClickUpApi } from './clickup.js';
 
 /**
  * Modalità bloccata (SPEC 7): finché è attiva /readyz risponde 503 e nessuna riserva è consentita.
@@ -44,11 +44,10 @@ export async function controlloContatori(
   for (const r of (await pool.query<{ anno: number; tipo: Tipo; m: number }>('SELECT anno, tipo, max(numero) AS m FROM documenti GROUP BY 1, 2')).rows)
     su(`${r.anno}|${r.tipo}`, r.m);
   if (clickup) {
-    for (const tipo of ['fattura', 'proforma'] as const) {
-      for (const t of await clickup.api.elencaTask(clickup.listId[tipo])) {
-        const c = t.chiave ? leggiChiave(t.chiave) : undefined;
-        if (c) su(`${c.anno}|${c.tipo}`, c.numero);
-      }
+    // Anche le task create a mano prima del servizio (numeri nei campi Anno / nr-fattura / nr-proforma):
+    // se il contatore è indietro rispetto a loro, il servizio resta bloccato invece di riemettere numeri già usati.
+    for (const lista of listeUniche(clickup.listId)) {
+      for (const t of await clickup.api.elencaTask(lista)) for (const c of t.numeri) su(`${c.anno}|${c.tipo}`, c.numero);
     }
   }
   for (const [k, m] of massimi) {

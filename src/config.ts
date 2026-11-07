@@ -9,6 +9,8 @@ export interface Config {
   bodyLimit: number;
   rateLimitPerMin: number;
   forzaBlocco: boolean;
+  /** Solo per prove: permette di sbloccare senza confrontare i numeri con ClickUp. In produzione resta false. */
+  avvioSenzaClickup: boolean;
   pg: { host: string; port: number; database: string; user: string; password: string; ssl: PgSsl; caFile?: string };
   tokens: { n8n: string; dashboard: string; owner: string };
   pagamentiTipo?: Tipo;
@@ -20,10 +22,32 @@ export interface Config {
     apiUrl: string;
     rpm: number;
     listId: Record<Tipo, string>;
-    campi: { chiave: string; numero?: string; business?: string; rata?: string };
+    campi: CampiClickUp;
   };
   worker: { interniSec: number; esterniSec: number };
   riconciliazione: { oraRoma: number; riservatoMaxOre: number };
+}
+
+/**
+ * ID dei campi custom della lista documenti. Solo `chiave` è obbligatorio; gli altri, se presenti,
+ * vengono compilati dal worker e (anno/numeri/flag) letti per riconoscere i numeri già usati a mano.
+ */
+export interface CampiClickUp {
+  chiave: string;
+  anno?: string;
+  numero: Partial<Record<Tipo, string>>;
+  flag: Partial<Record<Tipo, string>>;
+  totale: Partial<Record<Tipo, string>>;
+  dataDocumento?: string;
+  dataFattura?: string;
+  email?: string;
+  ragione?: string;
+  progetto?: string;
+  pagata?: string;
+  dataIncasso?: string;
+  area?: string;
+  metodo?: string;
+  rata?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -66,6 +90,7 @@ export function caricaConfig(env: Env = process.env): Config {
     bodyLimit: int(env, 'BODY_LIMIT', 65536, 1024, 1048576),
     rateLimitPerMin: int(env, 'RATE_LIMIT_PER_MIN', 120, 1, 100000),
     forzaBlocco: opt(env, 'FORZA_BLOCCO') === 'true',
+    avvioSenzaClickup: opt(env, 'AVVIO_SENZA_CLICKUP') === 'true',
     pg: {
       host: opt(env, 'PG_HOST') ?? 'services-postgres',
       port: int(env, 'PG_PORT', 5432, 1, 65535),
@@ -114,6 +139,9 @@ export function caricaConfig(env: Env = process.env): Config {
   const lf = opt(env, 'CLICKUP_LIST_ID_FATTURA');
   const lp = opt(env, 'CLICKUP_LIST_ID_PROFORMA');
   const cc = opt(env, 'CLICKUP_CAMPO_CHIAVE_ID');
+  // Configurazione ClickUp a metà = errore di avvio, non "ClickUp spento" in silenzio.
+  const parzialeCu = [ct, lf, lp, cc].filter(Boolean).length;
+  if (parzialeCu > 0 && parzialeCu < 4) throw new Error('ClickUp configurato a metà: servono CLICKUP_TOKEN, CLICKUP_LIST_ID_FATTURA, CLICKUP_LIST_ID_PROFORMA e CLICKUP_CAMPO_CHIAVE_ID');
   if (ct && lf && lp && cc) {
     cfg.clickup = {
       token: ct,
@@ -122,8 +150,19 @@ export function caricaConfig(env: Env = process.env): Config {
       listId: { fattura: lf, proforma: lp },
       campi: {
         chiave: cc,
-        numero: opt(env, 'CLICKUP_CAMPO_NUMERO_ID'),
-        business: opt(env, 'CLICKUP_CAMPO_BUSINESS_ID'),
+        anno: opt(env, 'CLICKUP_CAMPO_ANNO_ID'),
+        numero: { fattura: opt(env, 'CLICKUP_CAMPO_NUMERO_FATTURA_ID'), proforma: opt(env, 'CLICKUP_CAMPO_NUMERO_PROFORMA_ID') },
+        flag: { fattura: opt(env, 'CLICKUP_CAMPO_FLAG_FATTURA_ID'), proforma: opt(env, 'CLICKUP_CAMPO_FLAG_PROFORMA_ID') },
+        totale: { fattura: opt(env, 'CLICKUP_CAMPO_TOTALE_FATTURA_ID'), proforma: opt(env, 'CLICKUP_CAMPO_TOTALE_PROFORMA_ID') },
+        dataDocumento: opt(env, 'CLICKUP_CAMPO_DATA_DOCUMENTO_ID'),
+        dataFattura: opt(env, 'CLICKUP_CAMPO_DATA_FATTURA_ID'),
+        email: opt(env, 'CLICKUP_CAMPO_EMAIL_ID'),
+        ragione: opt(env, 'CLICKUP_CAMPO_RAGIONE_ID'),
+        progetto: opt(env, 'CLICKUP_CAMPO_PROGETTO_ID'),
+        pagata: opt(env, 'CLICKUP_CAMPO_PAGATA_ID'),
+        dataIncasso: opt(env, 'CLICKUP_CAMPO_DATA_INCASSO_ID'),
+        area: opt(env, 'CLICKUP_CAMPO_AREA_ID'),
+        metodo: opt(env, 'CLICKUP_CAMPO_METODO_ID'),
         rata: opt(env, 'CLICKUP_CAMPO_RATA_ID'),
       },
     };

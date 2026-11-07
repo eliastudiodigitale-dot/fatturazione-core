@@ -67,7 +67,7 @@ export const schemaBusta = {
     fonte: { type: 'string', enum: ['clickup', 'dashboard'] },
     ref: testo(200),
     tipo: { type: 'string', enum: ['fattura', 'proforma'] },
-    business: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,63}$' },
+    business: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' }, // es. serrandasu.it
     rata: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,40}$' },
     versione: { type: 'integer', minimum: 2, maximum: 99 },
     rif_proforma: testo(200),

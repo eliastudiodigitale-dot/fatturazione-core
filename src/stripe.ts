@@ -19,6 +19,14 @@ export interface StripeApi {
   piHaFattura(piId: string): Promise<boolean>;
   righeFattura(invoiceId: string): Promise<RigaCent[]>;
   clienteDaCharge(chargeId: string): Promise<Cliente>;
+  /** metadata.business del prodotto Stripe (impostato una volta per prodotto). */
+  businessDaProdotto(productId: string): Promise<string | undefined>;
+}
+
+/** ID dei prodotti delle righe di una invoice (campo diverso tra versioni API). */
+export function prodottiRighe(righe: Obj[]): string[] {
+  const ids = righe.map((l) => l.price?.product ?? l.pricing?.price_details?.product ?? l.plan?.product).map((p) => (typeof p === 'string' ? p : p?.id)).filter(Boolean);
+  return [...new Set(ids as string[])];
 }
 
 /** Importo netto di una riga di invoice: amount meno gli sconti applicati alla riga. */
@@ -57,6 +65,10 @@ export function creaStripe(apiKey: string, webhookSecret: string): StripeApi {
       const out: RigaCent[] = [];
       for await (const l of s.invoices.listLineItems(id, { limit: 100 })) out.push({ descrizione: l.description ?? 'Voce', centesimi: nettoRiga(l as unknown as Obj) });
       return out;
+    },
+    async businessDaProdotto(id) {
+      const p = await s.products.retrieve(id);
+      return p.metadata?.business || undefined;
     },
     async clienteDaCharge(chargeId) {
       const ch = await s.charges.retrieve(chargeId);
@@ -100,8 +112,15 @@ export function elaboratoreStripe(deps: { pool: pg.Pool; api: StripeApi; tipo: T
       const iva = (o.tax ?? 0) + (o.total_taxes ?? []).reduce((s: number, t: Obj) => s + (t.amount ?? 0), 0);
       if (iva > 0) throw new Rifiuto('stripe_iva_presente', { invoice: o.id, azione: 'regime forfettario: togliere le tasse in Stripe' });
       if ((o.amount_paid ?? 0) !== totale) throw new Rifiuto('stripe_pagato_diverso_dal_totale', { invoice: o.id, pagato: o.amount_paid ?? 0, totale });
-      const business = o.metadata?.business ?? o.parent?.subscription_details?.metadata?.business ?? o.subscription_details?.metadata?.business ?? deps.businessPredefinito ?? null;
-      if (!business) throw new Rifiuto('stripe_business_mancante', { invoice: o.id, azione: 'aggiungere metadata.business o STRIPE_BUSINESS_PREDEFINITO' });
+      let business: string | null = o.metadata?.business ?? o.parent?.subscription_details?.metadata?.business ?? o.subscription_details?.metadata?.business ?? null;
+      if (!business) {
+        // Più attività sullo stesso account Stripe: metadata.business sul PRODOTTO, una volta sola.
+        const prodotti = prodottiRighe(o.lines?.data ?? []);
+        const trovati = [...new Set((await Promise.all(prodotti.map((p) => deps.api.businessDaProdotto(p)))).filter(Boolean))] as string[];
+        if (trovati.length > 1) throw new Rifiuto('stripe_business_ambiguo', { invoice: o.id, attivita: trovati.join(','), azione: 'una invoice deve riguardare una sola attività' });
+        business = trovati[0] ?? deps.businessPredefinito ?? null;
+      }
+      if (!business) throw new Rifiuto('stripe_business_mancante', { invoice: o.id, azione: 'aggiungere metadata business al prodotto in Stripe' });
 
       let righe: RigaCent[] = (o.lines?.data ?? []).map((l: Obj) => ({ descrizione: l.description ?? 'Voce', centesimi: nettoRiga(l) }));
       if (o.lines?.has_more || righe.length === 0) righe = await deps.api.righeFattura(o.id);

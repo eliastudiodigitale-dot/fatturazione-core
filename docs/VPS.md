@@ -1,6 +1,16 @@
 # VPS: questo progetto
 
-Stato letto dal server il: MAI (si riempie con lo script di sync)
+Stato letto dal server il: 2026-11-07 (scripts/vps/ricognizione.sh, sola lettura, lanciata da Elia)
+
+## Ricognizione del 2026-11-07
+- Host `ubuntu`, x86_64, k3s v1.34.3. Utente `elia`: kubectl senza sudo sì; sudo chiede la password (import immagini con `ssh -t`).
+- `services-postgres`: label `app=services-postgres`, **ssl=off** → `PG_SSL=disable` (decisione #17).
+- Ingress: Traefik (kube-system, label `app.kubernetes.io/name=traefik`), coppie di ingress `*-http` / websecure, nessun cert-manager. Come vengono emessi i certificati: [DA VERIFICARE] con ricognizione-2.
+- n8n: label `app=n8n`. Keycloak: pod `keycloak` nel namespace `platform`; ingress `auth.gazzolaelia.it` (probabile URL di Keycloak) [DA VERIFICARE].
+- Sottodomini già usati su gazzolaelia.it, tra gli altri: api, auth, cms, admin, design, logs, status, finanze, portal, reti, stats, visual. `gestione` è libero; record DNS [DA VERIFICARE].
+- NetworkPolicy: nessuna nel namespace `platform` (solo hotspot-*).
+- ClickUp: workspace 90151964706; lista documenti `901518874514` "proforme e fatture" (spazio P.Iva › Documenti), unica per fatture e proforme, numerata a mano. Token in `archportal002/archportal002-secrets` (CLICKUP_API_TOKEN) e `platform/wisp-api-clickup-secrets`. Limite 100 richieste/min.
+- Altri servizi utili in `platform`: gotenberg (PDF), directus, seaweedfs.
 Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore della SPEC, commit fb69474). Nessun comando eseguito sul VPS.
 
 ## Cosa gira online

@@ -30,6 +30,7 @@ const stripeApi = (o: { piHaFattura?: boolean } = {}): StripeApi => ({
   piHaFattura: async () => o.piHaFattura ?? false,
   righeFattura: async () => [],
   clienteDaCharge: async () => ({ nome: 'Cliente Carta', email: 'carta@example.com' }),
+  businessDaProdotto: async (id: string) => ({ prod_serr: 'serrandasu.it', prod_hey: 'heyciar.it' })[id],
 });
 const firmaS = (b: string) => Stripe.webhooks.generateTestHeaderString({ payload: b, secret: ENV_TEST.STRIPE_WEBHOOK_SECRET! });
 function invoice(id: string, o: Record<string, unknown> = {}, ev: Record<string, unknown> = {}) {
@@ -309,7 +310,7 @@ describe('Guasti e modalità bloccata', () => {
       () => new Response('{}', { status: 400 }),
     ];
     const fetchFn = (async () => risposte[n++]!()) as unknown as typeof fetch;
-    const cu = creaClickUp({ token: 't', apiUrl: 'https://x', rpm: 6000, campoChiave: 'c', fetchFn });
+    const cu = creaClickUp({ token: 't', apiUrl: 'https://x', rpm: 6000, campi: cfgTest().clickup!.campi, fetchFn });
     expect(await cu.creaTask('l', { nome: 'a', descrizione: '', campi: [] })).toBe('tOK');
     expect(n).toBe(3);
     await expect(cu.creaTask('l', { nome: 'a', descrizione: '', campi: [] })).rejects.toBeInstanceOf(ErroreClickUp);
@@ -380,4 +381,112 @@ describe('Giornata tipo: tutte le fonti insieme', () => {
     expect(st.json().storico.map((s: { a_stato: string }) => s.a_stato)).toEqual(['riservato', 'creato']);
     await app.close();
   }, 60_000);
+});
+
+describe('Lista ClickUp reale (una lista, numeri storici a mano, campi esistenti)', () => {
+  const UNICA = { CLICKUP_LIST_ID_FATTURA: 'lista-unica', CLICKUP_LIST_ID_PROFORMA: 'lista-unica', CLICKUP_CAMPO_AREA_ID: 'campo-area', CLICKUP_CAMPO_METODO_ID: 'campo-metodo' };
+  const opzioni = [
+    { id: 'campo-area', name: 'AREA', type: 'drop_down', options: [{ id: 'op-serr', name: 'Serrandasu' }, { id: 'op-gaz', name: 'gazzolaelia.it' }] },
+    { id: 'campo-metodo', name: 'metodo-pag', type: 'drop_down', options: [{ id: 'op-bon', name: 'Bonifico' }, { id: 'op-str', name: 'Stripe' }] },
+  ];
+
+  it('numeri già usati a mano: il servizio resta bloccato finché il contatore non è riallineato, poi riparte dal successivo', async () => {
+    const { controlloContatori } = await import('../src/blocco.js');
+    const cu = new ClickUpFinto();
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'fattura', anno: ANNO, numero: 37 }]);
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'proforma', anno: ANNO, numero: 12 }, { tipo: 'fattura', anno: ANNO, numero: 36 }]);
+    const lid = { fattura: 'lista-unica', proforma: 'lista-unica' };
+    const problemi = await controlloContatori(pool, { api: cu, listId: lid });
+    expect(problemi).toEqual([`contatore ${ANNO}|fattura = 0 < massimo trovato 37`, `contatore ${ANNO}|proforma = 0 < massimo trovato 12`]);
+    // riallineamento come lo script owner (qui da superutente del DB di prova)
+    await admin.query(`INSERT INTO contatori(anno, tipo, ultimo) VALUES ($1, 'fattura', 37), ($1, 'proforma', 12)`, [ANNO]);
+    expect(await controlloContatori(pool, { api: cu, listId: lid })).toEqual([]);
+    const { app } = await costruisci({ pool });
+    expect((await post(app, bustaClickup('NUOVO'))).json().numero).toBe(38);
+    expect((await post(app, bustaClickup('NUOVO', { tipo: 'proforma' }))).json().numero).toBe(13);
+    await app.close();
+  });
+
+  it('la task nasce con i campi della lista: numero, anno, checkbox, totale, data, cliente, AREA e pagamento', async () => {
+    const { app } = await sistema({ cfg: UNICA });
+    await post(app, { ...bustaClickup('P1'), business: 'serrandasu.it', righe: [{ descrizione: 'Serranda', importo: 1200.5 }] });
+    const b = JSON.stringify(invoice('in_area', { metadata: { business: 'gazzolaelia.it' } }));
+    await app.inject({ method: 'POST', url: '/webhooks/stripe', headers: { 'stripe-signature': firmaS(b) }, payload: b });
+    await elaborati(1);
+    const cu = new ClickUpFinto();
+    cu.opzioni = opzioni;
+    const notif = notificheFinte();
+    const deps = { pool, api: cu, cfg: cfgTest(UNICA).clickup!, log: logMuto, notif };
+    await giroWorker(deps, [...FONTI_INTERNE, ...FONTI_ESTERNE]);
+    const [f1, f2] = [...cu.task.values()];
+    const campi = (t: typeof f1) => Object.fromEntries(t!.t!.campi.map((c) => [c.id, c.value]));
+    expect(campi(f1)).toMatchObject({ 'campo-chiave': `fattura|${ANNO}|1`, 'campo-anno': ANNO, 'campo-nr-f': 1, 'campo-flag-f': true, 'campo-tot-f': 1200.5, 'campo-ragione': 'Mario Rossi', 'campo-email': 'mario.rossi@example.com', 'campo-area': 'op-serr' });
+    expect(campi(f1)).not.toHaveProperty('campo-pagata');
+    expect(f1!.t!.campi.find((c) => c.id === 'campo-data')!.value_options).toEqual({ time: false });
+    expect(campi(f2)).toMatchObject({ 'campo-nr-f': 2, 'campo-pagata': true, 'campo-metodo': 'op-str', 'campo-area': 'op-gaz', 'campo-tot-f': 29 });
+    expect(f1!.lista).toBe('lista-unica');
+    expect(notif.lista).toEqual([]);
+    await app.close();
+  });
+
+  it('attività non presente nel menu AREA: la task nasce lo stesso, arriva un avviso', async () => {
+    const { app } = await costruisci({ pool });
+    await post(app, { ...bustaClickup('P2'), business: 'heyciar.it' });
+    const cu = new ClickUpFinto();
+    cu.opzioni = opzioni;
+    const notif = notificheFinte();
+    expect(await giroWorker({ pool, api: cu, cfg: cfgTest(UNICA).clickup!, log: logMuto, notif }, FONTI_INTERNE)).toEqual({ creati: 1 });
+    expect(notif.lista.map((n) => n.codice)).toEqual(['clickup_area_sconosciuta']);
+    await app.close();
+  });
+
+  it('riconciliazione: task storiche non sono "orfane"; un numero usato sia a mano sia dal servizio è segnalato', async () => {
+    const { app } = await costruisci({ pool });
+    await post(app, bustaClickup('P3'));
+    const cu = new ClickUpFinto();
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'proforma', anno: ANNO - 1, numero: 80 }]);
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'fattura', anno: ANNO, numero: 1 }]); // stesso numero che emetterà il servizio
+    const deps = { pool, api: cu, cfg: cfgTest(UNICA).clickup!, log: logMuto, notif: notificheFinte() };
+    await giroWorker(deps, FONTI_INTERNE);
+    const r = await riconcilia({ pool, notif: deps.notif, log: logMuto, riservatoMaxOre: 24, clickup: deps });
+    expect(r.taskOrfane).toEqual([]);
+    expect(r.taskDoppie).toEqual([]); // stessa lista per fatture e proforme: nessun falso doppione
+    expect(r.collisioni).toEqual([`fattura|${ANNO}|1`]);
+    await app.close();
+  });
+
+  it('Stripe con più attività: attività dal metadata del prodotto; prodotti di attività diverse nella stessa invoice -> bloccata', async () => {
+    const { app, notif } = await sistema();
+    const inv = (id: string, prodotti: string[]) =>
+      invoice(id, { metadata: {}, lines: { data: prodotti.map((p) => ({ description: 'Piano', amount: 2900 / prodotti.length, pricing: { price_details: { product: p } } })), has_more: false } });
+    const invia = (ev: unknown) => { const b = JSON.stringify(ev); return app.inject({ method: 'POST', url: '/webhooks/stripe', headers: { 'stripe-signature': firmaS(b) }, payload: b }); };
+    await invia(inv('in_p1', ['prod_serr']));
+    await invia(inv('in_p2', ['prod_serr', 'prod_hey']));
+    await aspetta(async () => notif.lista.length > 0 && (await q('SELECT count(*)::int AS n FROM documenti'))[0].n === 1);
+    expect((await q('SELECT business FROM documenti'))[0].business).toBe('serrandasu.it');
+    expect(notif.lista.map((n) => n.codice)).toContain('stripe_business_ambiguo');
+    await app.close();
+  });
+});
+
+describe('Lettura dei campi ClickUp nel formato reale delle API', () => {
+  it('numeri come testo, checkbox "true"/true, checkbox spenta o anno mancante = nessun numero', async () => {
+    const { infoTask } = await import('../src/clickup.js');
+    const campi = cfgTest().clickup!.campi;
+    const t = (cf: { id: string; value?: unknown }[]) => infoTask({ id: 'x', custom_fields: cf }, campi).numeri;
+    expect(t([{ id: 'campo-anno', value: '2026' }, { id: 'campo-nr-f', value: '37' }, { id: 'campo-flag-f', value: 'true' }])).toEqual([{ tipo: 'fattura', anno: 2026, numero: 37 }]);
+    expect(t([{ id: 'campo-anno', value: 2026 }, { id: 'campo-nr-p', value: 5 }, { id: 'campo-flag-p', value: true }, { id: 'campo-nr-f', value: 9 }, { id: 'campo-flag-f', value: true }])).toHaveLength(2);
+    expect(t([{ id: 'campo-anno', value: 2026 }, { id: 'campo-nr-f', value: 37 }])).toEqual([]); // checkbox non spuntata
+    expect(t([{ id: 'campo-nr-f', value: 37 }, { id: 'campo-flag-f', value: true }])).toEqual([]); // né anno né data
+    const ms = String(Date.UTC(2025, 5, 10));
+    expect(t([{ id: 'campo-nr-f', value: 37 }, { id: 'campo-flag-f', value: true }, { id: 'campo-data', value: ms }])).toEqual([{ tipo: 'fattura', anno: 2025, numero: 37 }]); // anno dalla data
+    expect(infoTask({ id: 'y', custom_fields: [{ id: 'campo-chiave', value: 'proforma|2026|4' }] }, campi).numeri).toEqual([{ tipo: 'proforma', anno: 2026, numero: 4 }]);
+  });
+});
+
+describe('Configurazione', () => {
+  it('ClickUp configurato a metà: il servizio non parte (mai "ClickUp spento" in silenzio)', () => {
+    expect(() => cfgTest({ CLICKUP_CAMPO_CHIAVE_ID: '' })).toThrow(/ClickUp configurato a metà/);
+    expect(cfgTest().clickup).toBeDefined();
+  });
 });

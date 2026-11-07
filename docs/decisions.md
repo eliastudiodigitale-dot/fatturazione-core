@@ -30,5 +30,10 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #23 | 2026-11-07 | Nessun registry: l'immagine si compila sul Mac e si importa in k3s (`k3s ctr images import`), tag fisso, imagePullPolicy Never | costo zero, nessuna credenziale in più | utente (proposta A dell'agente)
 #24 | 2026-11-07 | Nota di credito: nuovo tipo con numerazione propria, con migrazione dello schema, in Fase 2 insieme all'XML SDI | correzione fatture (decisione #9) | utente
 #25 | 2026-11-07 | Scelta del provider SDI: ricerca dedicata (/ricerca) in una sessione separata | Fase 2 | utente
+#26 | 2026-11-07 | GoCardless: la fattura nasce al versamento (GC_TRIGGER_ACTION=paid_out) | risposta di Elia nel Centro Fatturazione | utente
+#27 | 2026-11-07 | GoCardless serve una sola attività: GC_BUSINESS_PREDEFINITO=reti.gazzolaelia.it | risposta di Elia nel Centro Fatturazione | utente
+#28 | 2026-11-07 | Stripe serve più attività (serrandasu.it, gazzolaelia.it, heyciar.it): l'attività si legge da metadata "business" su invoice/abbonamento o, se manca, sul prodotto; invoice con prodotti di attività diverse = bloccata | risposta di Elia + regola dell'agente | utente
+#29 | 2026-11-07 | Token ClickUp: si riusa quello di archportal002-secrets (CLICKUP_API_TOKEN), copiato lato server; limite 100/min condiviso, il servizio ne usa 40 | risposta di Elia nel Centro Fatturazione | utente
+#30 | 2026-11-07 | ClickUp: lista unica "proforme e fatture" (901518874514) con i campi esistenti; i numeri già usati a mano (Anno + nr-fattura/nr-proforma + checkbox) bloccano l'avvio finché il contatore non è riallineato | evitare numeri doppi con la numerazione manuale precedente | agente (da confermare)
 
 Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.

@@ -21,7 +21,7 @@ const notif = creaNotificatore(boot, { telegram: cfg.telegram });
 
 const stripe = cfg.stripe ? creaStripe(cfg.stripe.apiKey, cfg.stripe.webhookSecret) : undefined;
 const gc = cfg.gocardless ? creaGc(cfg.gocardless.apiUrl, cfg.gocardless.apiToken) : undefined;
-const clickup = cfg.clickup ? creaClickUp({ token: cfg.clickup.token, apiUrl: cfg.clickup.apiUrl, rpm: cfg.clickup.rpm, campoChiave: cfg.clickup.campi.chiave }) : undefined;
+const clickup = cfg.clickup ? creaClickUp({ token: cfg.clickup.token, apiUrl: cfg.clickup.apiUrl, rpm: cfg.clickup.rpm, campi: cfg.clickup.campi }) : undefined;
 
 const elaboratori: Record<string, Elaboratore> = {};
 if (stripe && cfg.pagamentiTipo) elaboratori.stripe = elaboratoreStripe({ pool, api: stripe, tipo: cfg.pagamentiTipo, log: boot, notif, livemode: cfg.stripe!.livemode, businessPredefinito: cfg.stripe!.businessPredefinito });
@@ -38,6 +38,8 @@ const depsWorker: DepsWorker | undefined = clickup && cfg.clickup ? { pool, api:
 async function controllo() {
   try {
     const problemi = await controlloContatori(pool, depsWorker ? { api: depsWorker.api, listId: depsWorker.cfg.listId } : undefined);
+    // Senza ClickUp non si vedono i numeri già usati a mano: mai sbloccare alla cieca.
+    if (!depsWorker && !cfg.avvioSenzaClickup) problemi.push('ClickUp non configurato: impossibile confrontare i numeri già usati');
     const prima = blocco.bloccato;
     blocco.esito(problemi);
     if (blocco.bloccato) app.log.warn({ motivo: blocco.motivo }, 'modalità bloccata');

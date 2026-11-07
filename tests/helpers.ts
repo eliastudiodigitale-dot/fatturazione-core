@@ -6,7 +6,7 @@ import { Blocco } from '../src/blocco.js';
 import { creaApp, opzioniLogger } from '../src/app.js';
 import { creaEventi, type Elaboratore } from '../src/eventi.js';
 import type { Notificatore } from '../src/notifiche.js';
-import { ErroreClickUp, type ClickUpApi, type NuovaTask, type TaskInfo } from '../src/clickup.js';
+import { ErroreClickUp, leggiChiave, type CampoLista, type ClickUpApi, type NuovaTask, type TaskInfo } from '../src/clickup.js';
 import type { StripeApi } from '../src/stripe.js';
 import { ENV_TEST, PORTA } from './setup/env.js';
 
@@ -73,7 +73,7 @@ export function bustaClickup(progetto: string, o: { tipo?: 'fattura' | 'proforma
 
 /** ClickUp finto in memoria, con guasti simulabili. */
 export class ClickUpFinto implements ClickUpApi {
-  task = new Map<string, { lista: string; chiave: string | null; t?: NuovaTask; collegati: string[] }>();
+  task = new Map<string, { lista: string; chiave: string | null; t?: NuovaTask; collegati: string[]; numeri?: { tipo: 'fattura' | 'proforma'; anno: number; numero: number }[] }>();
   giu = false;
   /** Lancia dopo aver creato la task (simula pod ucciso / conferma persa). */
   crashDopoCreazione = false;
@@ -106,9 +106,25 @@ export class ClickUpFinto implements ClickUpApi {
     this.check();
     this.task.get(taskId)?.collegati.push(progetto);
   }
+  /** Task storica creata a mano (senza chiave), con i numeri nei campi Anno / nr-*. */
+  aggiungiAMano(listId: string, numeri: { tipo: 'fattura' | 'proforma'; anno: number; numero: number }[]) {
+    const id = `m${++this.seq}`;
+    this.task.set(id, { lista: listId, chiave: null, collegati: [], numeri });
+    return id;
+  }
+  opzioni: CampoLista[] = [];
+  async campiLista(): Promise<CampoLista[]> {
+    this.check();
+    return this.opzioni;
+  }
   async elencaTask(listId: string): Promise<TaskInfo[]> {
     this.check();
-    return [...this.task].filter(([, v]) => v.lista === listId).map(([id, v]) => ({ id, chiave: v.chiave }));
+    return [...this.task]
+      .filter(([, v]) => v.lista === listId)
+      .map(([id, v]) => {
+        const k = v.chiave ? leggiChiave(v.chiave) : undefined;
+        return { id, chiave: v.chiave, numeri: k ? [k] : (v.numeri ?? []) };
+      });
   }
 }
 

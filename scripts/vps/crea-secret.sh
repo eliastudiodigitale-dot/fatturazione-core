@@ -46,7 +46,15 @@ if [ "$TIPO" = api ]; then
   chiedi STRIPE_API_KEY "Stripe > chiave RISTRETTA in sola lettura (rk_live_...)"
   chiedi GC_WEBHOOK_SECRET "GoCardless > Developers > Webhook endpoint > Secret"
   chiedi GC_API_TOKEN "GoCardless > Developers > Access token in sola lettura"
-  chiedi CLICKUP_TOKEN "ClickUp > token personale del bot (pk_...)"
+  # Token ClickUp: copiato lato server dal secret già esistente (scelta di Elia), senza mai mostrarlo.
+  printf 'CLICKUP_TOKEN\n  Copio il token ClickUp da archportal002/archportal002-secrets? (s = sì, n = lo incollo io) '; read -r R
+  if [ "$R" = "s" ]; then
+    V=$($K -n archportal002 get secret archportal002-secrets -o jsonpath='{.data.CLICKUP_API_TOKEN}' | base64 -d)
+    [ -n "$V" ] && printf 'CLICKUP_TOKEN=%s\n' "$V" >> "$F" && echo "  copiato." || echo "  NON trovato: lo salto."
+    unset V
+  else
+    chiedi CLICKUP_TOKEN "ClickUp > token personale (pk_...)"
+  fi
   chiedi TELEGRAM_BOT_TOKEN "Telegram > token dato da @BotFather"
 else
   chiedi B2_ACCOUNT_ID "Backblaze > Application Key > keyID"
