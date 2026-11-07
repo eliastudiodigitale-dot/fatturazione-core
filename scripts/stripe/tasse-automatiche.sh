@@ -24,7 +24,8 @@ fi
 CTX=""
 api() { # metodo, percorso, [dati...]
   local m="$1" p="$2"; shift 2
-  { printf 'user = "%s:"\n' "$KEY"; [ -n "$CTX" ] && printf 'header = "Stripe-Context: %s"\n' "$CTX"; } \
+  # Stripe-Version: obbligatoria con le chiavi di organizzazione; la stessa versione della libreria del servizio.
+  { printf 'user = "%s:"\n' "$KEY"; printf 'header = "Stripe-Version: 2026-10-28.endive"\n'; [ -n "$CTX" ] && printf 'header = "Stripe-Context: %s"\n' "$CTX"; } \
     | curl -sS --config - -X "$m" "https://api.stripe.com/v1$p" "$@"
 }
 tutti() { # percorso base con parametri -> stampa gli oggetti uno per riga
