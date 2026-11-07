@@ -70,6 +70,24 @@ describe('API', () => {
     await app.close();
   });
 
+  it('fattura riservata non si annulla (decisione #9: nota di credito)', async () => {
+    const { app } = await costruisci({ pool });
+    const b = bustaClickup('p1');
+    await app.inject({ method: 'POST', url: '/v1/documenti', headers: AUTH.n8n, payload: b });
+    const r = await app.inject({ method: 'POST', url: `/v1/documenti/${encodeURIComponent(b.ref)}/annulla`, headers: AUTH.owner, payload: { motivo: 'prova annullo' } });
+    expect(r.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it('proforma annullata: la rifatta prende il numero successivo, mai riusato', async () => {
+    const { app } = await costruisci({ pool });
+    for (const p of ['a', 'b']) await app.inject({ method: 'POST', url: '/v1/documenti', headers: AUTH.n8n, payload: bustaClickup(p, { tipo: 'proforma' }) });
+    await app.inject({ method: 'POST', url: `/v1/documenti/${encodeURIComponent('a|proforma|unica')}/annulla`, headers: AUTH.owner, payload: { motivo: 'da rifare' } });
+    const rifatta = await app.inject({ method: 'POST', url: '/v1/documenti', headers: AUTH.n8n, payload: bustaClickup('a', { tipo: 'proforma', rata: 'r2' }) });
+    expect(rifatta.json().numero).toBe(3);
+    await app.close();
+  });
+
   it('fattura inviata allo SDI non si annulla', async () => {
     const { app } = await costruisci({ pool });
     const b = bustaClickup('p1');

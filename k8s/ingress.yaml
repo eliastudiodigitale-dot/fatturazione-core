@@ -1,6 +1,7 @@
 # Esposizione pubblica: solo /webhooks/* (Stripe, GoCardless). NON applicato.
 # L'API /v1 resta interna al cluster (n8n e dashboard nel namespace platform).
-# [DA DEFINIRE] host pubblico e certificato (cert-manager? secret TLS esistente?). Solo HTTPS.
+# Host: gestione.gazzolaelia.it (decisione #19). [DA VERIFICARE] come vengono emessi i certificati sul VPS. Solo HTTPS.
+# Solo i due percorsi esatti dei webhook: il resto dell'host resta libero per altri servizi (es. dashboard in Fase 3).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,14 +12,20 @@ metadata:
     traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
   tls:
-    - hosts: [HOST_DA_DEFINIRE]
+    - hosts: [gestione.gazzolaelia.it]
       secretName: TLS_DA_DEFINIRE
   rules:
-    - host: HOST_DA_DEFINIRE
+    - host: gestione.gazzolaelia.it
       http:
         paths:
-          - path: /webhooks/
-            pathType: Prefix
+          - path: /webhooks/stripe
+            pathType: Exact
+            backend:
+              service:
+                name: fatturazione-core
+                port: {name: http}
+          - path: /webhooks/gocardless
+            pathType: Exact
             backend:
               service:
                 name: fatturazione-core

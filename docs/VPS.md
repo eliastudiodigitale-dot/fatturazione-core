@@ -10,8 +10,10 @@ Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore dell
 - Secret esistente: `fatturazione-secrets` (ns `platform`), chiavi: PG_USER, PG_PASS, PG_DB, APP_PG_USER, APP_PG_PASS
 - CronJob: `fatturazione-backup` (03:40 Europe/Rome, pg_dump -Fc, retention 30 gg, PVC `fatturazione-backup` 500 Mi `local-path`), `fatturazione-pulizia` (03:20)
 - Altri servizi nel namespace: n8n (`N8N_HOST=n8n.spaziocliente.it`), Keycloak (namespace e URL [DA VERIFICARE])
+- Accesso: IP 185.229.239.205, alias SSH `vps-se` (sul Mac di Elia), utente `elia`, chiave con passphrase. Utenti dedicati agli agenti: da costruire (docs/accessi-da-creare.md)
+- Ricognizione in sola lettura: `ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh`
 - Cartella sul server: [DA VERIFICARE]
-- Dominio o URL del servizio: [DA VERIFICARE]
+- Dominio o URL del servizio: `gestione.gazzolaelia.it` (decisione #19), solo `/webhooks/stripe` e `/webhooks/gocardless` pubblici; non ancora configurato
 - Commit o tag deployato: nessuno (servizio non deployato) [DA VERIFICARE]
 
 ## Deploy e rollback

@@ -13,5 +13,7 @@ const TRANSIZIONI: Record<Stato, readonly Stato[]> = {
 export function transizioneValida(tipo: Tipo, da: Stato, a: Stato): boolean {
   // Le proforme non vanno allo SDI: si fermano a 'creato'.
   if (tipo === 'proforma' && (a === 'inviato_sdi' || a === 'consegnato')) return false;
+  // Le fatture non si annullano mai: si corregge con nota di credito (decisione #9).
+  if (tipo === 'fattura' && a === 'annullato') return false;
   return TRANSIZIONI[da].includes(a);
 }
