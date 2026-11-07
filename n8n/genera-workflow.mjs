@@ -9,8 +9,11 @@ const logica = readFileSync(new URL('prepara-busta.js', dir), 'utf8');
 const CONFIG = {
   // Liste dei progetti da controllare (spazio "Studio 3D & Render" > Progetti attivi) [DA CONFERMARE con la ricognizione-3]
   liste: ['901517931489', '901521040352'],
-  // Attività (business) di ogni lista progetti. Se la lista non è qui, si usa il menu AREA della task; se manca anche quello, errore.
-  businessPerLista: {},
+  // Attività di ogni lista progetti (risposta di Elia nel Centro Fatturazione: gazzolaelia.it).
+  // Se il progetto ha il menu "Business" compilato vale quello (nome a dominio, o tramite aliasBusiness).
+  businessPerLista: { '901517931489': 'gazzolaelia.it', '901521040352': 'gazzolaelia.it' },
+  // Opzioni del menu "Business" che non sono un dominio [DA CONFERMARE].
+  aliasBusiness: { 'studio digitale di elia gazzola': 'gazzolaelia.it' },
   campi: {
     emetti: ['Emetti documento'],
     importo: ['Importo documento'],
@@ -18,17 +21,22 @@ const CONFIG = {
     rata: ['Rata'],
     versione: ['Versione documento'],
     descrizione: ['Descrizione documento'],
-    attivita: ['AREA', 'Attività'],
+    attivita: ['Business'], // NON "AREA": AREA è il settore del cliente (Edilizia, Carpenteria, ...)
+    segnaProforma: ['pf-creata'], // spuntato quando la proforma è riservata (come faceva il flusso precedente)
+    segnaFattura: ['# fattura'], // scritto "n/anno" quando la fattura è riservata
   },
   campiCliente: {
-    ragione_sociale: ['Ragione sociale', 'ragione'],
-    email: ['Email', 'E-mail', 'emailcliente', 'Mail'],
+    ragione_sociale: ['Azienda', 'Ragione sociale', 'ragione'],
+    nome: ['nome'],
+    cognome: ['Cognome'],
+    email: ['email lavoro', 'Email', 'E-mail', 'emailcliente', 'Mail'],
     pec: ['PEC'],
-    telefono: ['Telefono', 'Cellulare'],
+    telefono: ['telefono', 'cellulare'],
     partita_iva: ['Partita IVA', 'P.IVA', 'PIVA', 'P IVA'],
-    codice_fiscale: ['Codice fiscale', 'CF'],
+    codice_fiscale: ['C.F.', 'Codice fiscale', 'CF'],
     codice_destinatario: ['Codice destinatario', 'SDI', 'Codice SDI'],
-    via: ['Indirizzo', 'Via'],
+    indirizzo_unico: ['Indirizzo'], // nei contatti è un solo campo: "Via Roma 1, 20100 Milano (MI)"
+    via: ['Via'],
     cap: ['CAP'],
     citta: ['Città', 'Comune'],
     provincia: ['Provincia', 'Prov'],
@@ -77,6 +85,10 @@ return { json: { sel, busta: costruisciBusta(sel, $json, C) } };`, 'runOnceForEa
   nodo('Esito', 'n8n-nodes-base.code', 2, code(`const sel = $('Busta').item.json.sel;
 const r = esitoRisposta($json.statusCode, $json.body, sel);
 return { json: { ...r, task_id: sel.task_id, campo_emetti_id: sel.campo_emetti_id } };`, 'runOnceForEachItem')),
+  nodo('Segna sul progetto', 'n8n-nodes-base.code', 2, { mode: 'runOnceForAllItems', language: 'javaScript', jsCode: `return $input.all().flatMap((it) => (it.json.segna ?? []).map((s) => ({ json: { task_id: it.json.task_id, field_id: s.field_id, value: s.value } })));` }),
+  nodo('Scrivi campo progetto', 'n8n-nodes-base.httpRequest', 4.2, http('POST', `=${CU}/task/{{ $json.task_id }}/field/{{ $json.field_id }}`, {
+    sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify({ value: $json.value }) }}',
+  }), { credentials: credCU }),
   nodo('Esito dati', 'n8n-nodes-base.code', 2, code(`return { json: { azione: 'errore', commento: '❌ Nessun numero assegnato: ' + $json.errore, pulisci: true, task_id: $json.task_id, campo_emetti_id: $json.campo_emetti_id } };`, 'runOnceForEachItem')),
   nodo('Da commentare?', 'n8n-nodes-base.if', 2, se('={{ !!$json.commento }}')),
   nodo('Commenta la task', 'n8n-nodes-base.httpRequest', 4.2, http('POST', `=${CU}/task/{{ $json.task_id }}/comment`, {
@@ -98,7 +110,8 @@ const connections = {
   'Contatto cliente': { main: [[vai('Busta')]] },
   Busta: { main: [[vai('Invia al servizio')]] },
   'Invia al servizio': { main: [[vai('Esito')]] },
-  Esito: { main: [[vai('Da commentare?')]] },
+  Esito: { main: [[vai('Da commentare?'), vai('Segna sul progetto')]] },
+  'Segna sul progetto': { main: [[vai('Scrivi campo progetto')]] },
   'Esito dati': { main: [[vai('Da commentare?')]] },
   'Da commentare?': { main: [[vai('Commenta la task')], []] },
   'Commenta la task': { main: [[vai('Svuotare il campo?')]] },

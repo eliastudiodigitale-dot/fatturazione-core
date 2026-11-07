@@ -43,12 +43,31 @@ function daEmettere(task, C) {
   const clienti = valoreCampo(campoPerNome(task, C.campi.cliente)) ?? [];
   if (clienti.length !== 1) return { ...base, ok: false, errore: `"${C.campi.cliente[0]}" deve collegare esattamente un contatto (ora: ${clienti.length})` };
   const listaId = task.list?.id ?? '';
-  const business = C.businessPerLista[listaId] ?? valoreCampo(campoPerNome(task, C.campi.attivita)) ?? null;
-  if (!business) return { ...base, ok: false, errore: `attività sconosciuta per la lista ${listaId}: aggiungerla in Configurazione` };
+  // Attività: menu "Business" del progetto se compilato (con alias, es. STUDIO DIGITALE -> gazzolaelia.it), altrimenti quella della lista.
+  const dalMenu = valoreCampo(campoPerNome(task, C.campi.attivita));
+  const alias = dalMenu ? C.aliasBusiness[String(dalMenu).toLowerCase().trim()] : undefined;
+  // Menu compilato ma non riconosciuto = errore (mai l'attività della lista al suo posto, in silenzio).
+  const business = dalMenu
+    ? (alias ?? (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(String(dalMenu).trim()) ? dalMenu : null))
+    : (C.businessPerLista[listaId] ?? null);
+  if (!business) return { ...base, ok: false, errore: dalMenu ? `attività "${dalMenu}" non riconosciuta: aggiungerla agli alias in Configurazione` : `attività sconosciuta per la lista ${listaId}: aggiungerla in Configurazione` };
   const rata = slug(valoreCampo(campoPerNome(task, C.campi.rata)) ?? 'unica') || 'unica';
   const versione = valoreCampo(campoPerNome(task, C.campi.versione));
   const descrizione = valoreCampo(campoPerNome(task, C.campi.descrizione)) ?? task.name;
-  return { ...base, ok: true, tipo, importo, cliente_id: clienti[0], business: String(business).toLowerCase().trim().replace(/[^a-z0-9._-]/g, ''), rata, versione: Number.isInteger(versione) && versione >= 2 ? versione : null, descrizione, url: task.url ?? null };
+  const segna = { proforma: campoPerNome(task, C.campi.segnaProforma)?.id ?? null, fattura: campoPerNome(task, C.campi.segnaFattura)?.id ?? null };
+  return { ...base, ok: true, segna, tipo, importo, cliente_id: clienti[0], business: String(business).toLowerCase().trim().replace(/[^a-z0-9._-]/g, ''), rata, versione: Number.isInteger(versione) && versione >= 2 ? versione : null, descrizione, url: task.url ?? null };
+}
+
+/** "Via Roma 1, 20100 Milano (MI)" -> {via, cap, citta, provincia}; se non si riconosce, tutto in "via". */
+function scomponiIndirizzo(s) {
+  const t = String(s ?? '').trim().replace(/\s+/g, ' ');
+  if (!t) return {};
+  const m = /^(.*?)[,\s]+(\d{5})[,\s]+(.+?)(?:\s*\(\s*([A-Za-z]{2})\s*\)|[\s,]+([A-Z]{2}))?\s*$/.exec(t);
+  if (!m) return { via: t };
+  const out = { via: m[1].replace(/[,\s]+$/, ''), cap: m[2], citta: m[3].replace(/[,\s]+$/, '') };
+  const prov = m[4] ?? m[5];
+  if (prov) out.provincia = prov.toUpperCase();
+  return out;
 }
 
 /** Dati del cliente dalla task del contatto (lista contatti), per nome dei campi. */
@@ -56,8 +75,9 @@ function clienteDaContatto(contatto, C) {
   const v = (k) => valoreCampo(campoPerNome(contatto, C.campiCliente[k]));
   const out = {};
   const ragione = v('ragione_sociale');
+  const persona = [v('nome'), v('cognome')].filter(Boolean).join(' ');
   if (ragione) out.ragione_sociale = ragione;
-  else out.nome = contatto.name;
+  else out.nome = persona || contatto.name;
   const metti = (k, val) => {
     if (val !== null && val !== undefined && val !== '') out[k] = typeof val === 'string' ? val.trim() : val;
   };
@@ -70,7 +90,7 @@ function clienteDaContatto(contatto, C) {
   if (cf) metti('codice_fiscale', String(cf).replace(/\s/g, '').toUpperCase());
   const sdi = v('codice_destinatario');
   if (sdi) metti('codice_destinatario', String(sdi).replace(/\s/g, '').toUpperCase());
-  const ind = {};
+  const ind = { ...scomponiIndirizzo(v('indirizzo_unico')) };
   for (const k of ['via', 'cap', 'citta', 'provincia', 'paese']) {
     const x = v(k);
     if (x) ind[k] = k === 'provincia' || k === 'paese' ? String(x).trim().toUpperCase() : String(x).trim();
@@ -103,7 +123,10 @@ function esitoRisposta(status, body, sel) {
   if (status === 200) {
     const etichetta = b.tipo === 'fattura' ? 'Fattura' : 'Proforma';
     const avvisi = (b.avvisi ?? []).length ? `\nDa completare per lo SDI: ${b.avvisi.join('; ')}` : '';
-    return { azione: 'fatto', commento: `✅ ${etichetta} ${b.numero}/${b.anno} riservata. La task del documento arriva in "proforme e fatture" entro 2 minuti.${avvisi}`, pulisci: true };
+    const segna = [];
+    if (b.tipo === 'proforma' && sel.segna?.proforma) segna.push({ field_id: sel.segna.proforma, value: true });
+    if (b.tipo === 'fattura' && sel.segna?.fattura) segna.push({ field_id: sel.segna.fattura, value: `${b.numero}/${b.anno}` });
+    return { azione: 'fatto', commento: `✅ ${etichetta} ${b.numero}/${b.anno} riservata. La task del documento arriva in "proforme e fatture" entro 2 minuti.${avvisi}`, pulisci: true, segna };
   }
   if (status === 400 || status === 409) {
     let msg = b.errore ?? 'dati non validi';

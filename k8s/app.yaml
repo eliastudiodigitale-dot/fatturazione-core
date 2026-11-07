@@ -109,7 +109,7 @@ data:
   CLICKUP_CAMPO_PROGETTO_ID: "ce95ab64-a43b-4a75-bc93-ec8a4cbb8410"        # progetto-rif (relationship)
   CLICKUP_CAMPO_PAGATA_ID: "528f9b5b-2556-4677-bd6c-f4131a34db46"          # pagata (Stripe/GoCardless)
   CLICKUP_CAMPO_DATA_INCASSO_ID: "c7b2c204-69b1-4b83-b576-03f53944ff32"    # d-incasso
-  CLICKUP_CAMPO_AREA_ID: "dceab1e6-72dc-4f34-bf13-a0e85ca4c6f2"            # AREA (opzione scelta per nome dell'attività)
+  CLICKUP_CAMPO_AREA_ID: ""        # NON usato: AREA è il settore del cliente (Edilizia, ...), l'attività sta in "Business" dei progetti
   CLICKUP_CAMPO_METODO_ID: "b82c93df-8c62-4890-83c6-de430f82c598"          # metodo-pag (Stripe / GoCardless per nome)
   CLICKUP_RPM: "40"                # limite del token 100/min, condiviso con archportal002 (stesso token): ne usiamo meno della metà
   WORKER_INTERNI_SEC: "90"
