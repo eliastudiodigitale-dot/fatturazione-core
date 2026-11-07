@@ -12,8 +12,9 @@ export interface Config {
   pg: { host: string; port: number; database: string; user: string; password: string; ssl: PgSsl; caFile?: string };
   tokens: { n8n: string; dashboard: string; owner: string };
   pagamentiTipo?: Tipo;
-  stripe?: { webhookSecret: string; apiKey: string };
-  gocardless?: { webhookSecret: string; apiToken: string; trigger: GcTrigger; apiUrl: string };
+  stripe?: { webhookSecret: string; apiKey: string; livemode: boolean; businessPredefinito?: string };
+  gocardless?: { webhookSecret: string; apiToken: string; trigger: GcTrigger; apiUrl: string; businessPredefinito?: string };
+  telegram?: { token: string; chatId: string };
   clickup?: {
     token: string;
     apiUrl: string;
@@ -88,13 +89,25 @@ export function caricaConfig(env: Env = process.env): Config {
 
   const sws = opt(env, 'STRIPE_WEBHOOK_SECRET');
   const sk = opt(env, 'STRIPE_API_KEY');
-  if (sws && sk) cfg.stripe = { webhookSecret: sws, apiKey: sk };
+  // STRIPE_LIVEMODE (default true): in produzione gli eventi di test vengono ignorati, e viceversa.
+  const lm = oneOf(env, 'STRIPE_LIVEMODE', ['true', 'false'] as const) ?? 'true';
+  if (sws && sk) cfg.stripe = { webhookSecret: sws, apiKey: sk, livemode: lm === 'true', businessPredefinito: opt(env, 'STRIPE_BUSINESS_PREDEFINITO') };
+
+  const tt = opt(env, 'TELEGRAM_BOT_TOKEN');
+  const tc = opt(env, 'TELEGRAM_CHAT_ID');
+  if (tt && tc) cfg.telegram = { token: tt, chatId: tc };
 
   const gws = opt(env, 'GC_WEBHOOK_SECRET');
   const gtok = opt(env, 'GC_API_TOKEN');
   const gtr = oneOf(env, 'GC_TRIGGER_ACTION', ['confirmed', 'paid_out'] as const);
   if (gws && gtok && gtr) {
-    cfg.gocardless = { webhookSecret: gws, apiToken: gtok, trigger: gtr, apiUrl: opt(env, 'GC_API_URL') ?? 'https://api.gocardless.com' };
+    cfg.gocardless = {
+      webhookSecret: gws,
+      apiToken: gtok,
+      trigger: gtr,
+      apiUrl: opt(env, 'GC_API_URL') ?? 'https://api.gocardless.com',
+      businessPredefinito: opt(env, 'GC_BUSINESS_PREDEFINITO'),
+    };
   }
 
   const ct = opt(env, 'CLICKUP_TOKEN');
@@ -126,7 +139,9 @@ export function riassuntoConfig(c: Config): Record<string, unknown> {
     forzaBlocco: c.forzaBlocco,
     stripe: Boolean(c.stripe),
     gocardless: c.gocardless ? c.gocardless.trigger : false,
+    stripeLivemode: c.stripe?.livemode ?? null,
     clickup: Boolean(c.clickup),
+    telegram: Boolean(c.telegram),
     pagamentiTipo: c.pagamentiTipo ?? null,
   };
 }

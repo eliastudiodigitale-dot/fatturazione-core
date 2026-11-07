@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type pg from 'pg';
 import type { Config, Tipo } from './config.js';
 import { LOCK_CLICKUP } from './db.js';
-import { chiaveDocumento, type ClickUpApi, type NuovaTask } from './clickup.js';
+import { chiaveDocumento, ErroreClickUp, type ClickUpApi, type NuovaTask } from './clickup.js';
 import { aggiornaTask, cambiaStato, type Documento } from './documenti.js';
 import type { Notificatore } from './notifiche.js';
 
@@ -98,6 +98,12 @@ export async function giroWorker(deps: DepsWorker, fonti: string[]): Promise<{ c
         await cambiaStato(deps.pool, d.ref, 'creato', { clickupTaskId: id, dettaglio: { clickup_task_id: id } });
         creati++;
       } catch (e) {
+        // 4xx (lista o campo sbagliato per QUESTO documento): si segnala e si passa al successivo,
+        // così un documento con dati errati non blocca tutti gli altri. Rete/5xx/429: ClickUp non disponibile, ci si ferma.
+        if (e instanceof ErroreClickUp && e.status >= 400 && e.status < 500 && e.status !== 429) {
+          deps.notif.anomalia('clickup_documento_rifiutato', { ref: d.ref, status: e.status });
+          continue;
+        }
         deps.log.error({ ref: d.ref, err: (e as Error).message }, 'worker ClickUp: giro interrotto');
         break;
       }

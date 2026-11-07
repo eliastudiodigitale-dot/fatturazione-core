@@ -34,7 +34,18 @@ export function creaEventi(
     return r.rows[0]?.id ?? null;
   }
 
-  async function elabora(id: string): Promise<Esito | 'occupato'> {
+  /**
+   * Le elaborazioni girano UNA alla volta: ognuna tiene una connessione (lock) e ne usa un'altra per la riserva;
+   * in parallelo esaurirebbero il pool e bloccherebbero anche le API. Una alla volta basta: sono eventi leggeri.
+   */
+  let coda: Promise<unknown> = Promise.resolve();
+  function elabora(id: string): Promise<Esito | 'occupato'> {
+    const p = coda.then(() => elaboraOra(id));
+    coda = p.catch(() => undefined);
+    return p;
+  }
+
+  async function elaboraOra(id: string): Promise<Esito | 'occupato'> {
     if (bloccato()) return 'riprova'; // modalità bloccata: nessuna riserva, l'evento resta in coda
     const c = await pool.connect();
     try {

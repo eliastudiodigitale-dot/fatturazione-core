@@ -3,7 +3,7 @@ import { creaPool } from './db.js';
 import { Blocco, controlloContatori } from './blocco.js';
 import { creaApp } from './app.js';
 import { creaEventi, type Elaboratore } from './eventi.js';
-import { notificatoreLog } from './notifiche.js';
+import { creaNotificatore } from './notifiche.js';
 import { creaStripe, elaboratoreStripe } from './stripe.js';
 import { creaGc, elaboratoreGc } from './gocardless.js';
 import { creaClickUp } from './clickup.js';
@@ -17,15 +17,15 @@ const blocco = new Blocco(cfg.forzaBlocco);
 // Logger provvisorio per costruire le dipendenze; l'app ha il suo (stessa configurazione).
 const { default: Fastify } = await import('fastify');
 const boot = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } }).log;
-const notif = notificatoreLog(boot);
+const notif = creaNotificatore(boot, { telegram: cfg.telegram });
 
 const stripe = cfg.stripe ? creaStripe(cfg.stripe.apiKey, cfg.stripe.webhookSecret) : undefined;
 const gc = cfg.gocardless ? creaGc(cfg.gocardless.apiUrl, cfg.gocardless.apiToken) : undefined;
 const clickup = cfg.clickup ? creaClickUp({ token: cfg.clickup.token, apiUrl: cfg.clickup.apiUrl, rpm: cfg.clickup.rpm, campoChiave: cfg.clickup.campi.chiave }) : undefined;
 
 const elaboratori: Record<string, Elaboratore> = {};
-if (stripe && cfg.pagamentiTipo) elaboratori.stripe = elaboratoreStripe({ pool, api: stripe, tipo: cfg.pagamentiTipo, log: boot });
-if (gc && cfg.gocardless && cfg.pagamentiTipo) elaboratori.gocardless = elaboratoreGc({ pool, api: gc, tipo: cfg.pagamentiTipo, trigger: cfg.gocardless.trigger });
+if (stripe && cfg.pagamentiTipo) elaboratori.stripe = elaboratoreStripe({ pool, api: stripe, tipo: cfg.pagamentiTipo, log: boot, notif, livemode: cfg.stripe!.livemode, businessPredefinito: cfg.stripe!.businessPredefinito });
+if (gc && cfg.gocardless && cfg.pagamentiTipo) elaboratori.gocardless = elaboratoreGc({ pool, api: gc, tipo: cfg.pagamentiTipo, trigger: cfg.gocardless.trigger, notif, businessPredefinito: cfg.gocardless.businessPredefinito });
 const eventi = creaEventi(pool, boot, notif, elaboratori, () => blocco.bloccato);
 
 const app = await creaApp({ cfg, pool, blocco, eventi, stripe });
@@ -45,6 +45,7 @@ async function controllo() {
     for (const p of problemi) notif.anomalia('contatore', { dettaglio: p });
   } catch (e) {
     blocco.esito([`controllo non eseguibile: ${(e as Error).message}`]);
+    notif.anomalia('avvio_bloccato', { motivo: 'controllo contatori non eseguibile (DB o ClickUp non raggiungibili)' });
     app.log.error({ err: (e as Error).message }, 'controllo contatori fallito: resto bloccato');
   }
 }

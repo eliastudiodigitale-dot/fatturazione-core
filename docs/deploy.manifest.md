@@ -15,11 +15,14 @@ Descrive ciò che il repo documenta al 2026-11-07. Il servizio **non è mai stat
 | Backup e pulizia | `k8s/backup-cronjob.yaml`, `k8s/pulizia-cronjob.yaml` | Dichiarati applicati sul VPS da SPEC sez. 2, non letti dal server (VPS.md: sync MAI) [DA VERIFICARE]. Copia ricostruita, [NON VERIFICATO] byte per byte |
 | Riallineamento contatore | `scripts/riallinea-contatore.sql` | Solo dopo un ripristino del DB (SPEC 7), manuale, ruolo owner |
 | Ricognizione | `scripts/vps/ricognizione.sh` | Sola lettura, raccoglie i dati del VPS |
+| Creazione Secret | `scripts/vps/crea-secret.sh api\|offsite` | Interattivo sul VPS: genera i 3 token, chiede le chiavi senza mostrarle |
+| Backup fuori VPS | `k8s/backup-offsite-cronjob.yaml` | 04:10, copia cifrata (rclone crypt) su Backblaze B2 (decisione #22); NON applicato |
+| Script di rilascio | `scripts/rilascio/migra.sh`, `rilascia.sh`, `verifica.sh` | Dal Mac via SSH: migrazione, build+import+apply, stato. Mai provati sul VPS [DA VERIFICARE] |
 
 ## Metodo
 - **Immagine:** è un'immagine Docker compilata sul Mac (`Dockerfile`: build in `node:24.22.2-alpine`, runtime `gcr.io/distroless/nodejs24-debian12:nonroot`, utente 65532).
 - **Niente registry** (decisione #23): l'immagine si importa in k3s con `k3s ctr images import` e si usa con un tag fisso.
-- **Disallineamento con #23:** `k8s/app.yaml` contiene ancora `REGISTRY_DA_DEFINIRE/...` e `imagePullPolicy: IfNotPresent`. Va portato a `fatturazione-core:<tag>` con `imagePullPolicy: Never`.
+- `k8s/app.yaml` usa `image: fatturazione-core:<tag>` con `imagePullPolicy: Never` (allineato a #23); `scripts/rilascio/rilascia.sh <tag>` sostituisce il tag.
 - **Manifest:** si applicano a mano con `kubectl apply`. Nel repo non ci sono kustomize, compose né CI.
 - **Architettura del VPS:** [DA VERIFICARE], perché decide `--platform` del build.
 - **Comando di import sul VPS:** [DA VERIFICARE] (sudo, socket di containerd).
@@ -37,10 +40,10 @@ Non esiste nel repo. Gli unici ambienti di prova sono il Postgres locale dei tes
 
 ## Prod
 - **Deploy** (dai file del repo, non ancora eseguito):
-  1. Elia crea il Secret `fatturazione-api-secrets`.
-  2. Migrazioni 003 e 004 col Job, una alla volta.
-  3. Import dell'immagine in k3s.
-  4. `kubectl apply -f k8s/app.yaml -f k8s/networkpolicy.yaml -f k8s/ingress.yaml`.
+  1. Elia crea il Secret `fatturazione-api-secrets` con `scripts/vps/crea-secret.sh api`.
+  2. Migrazioni 003 e 004 col Job, una alla volta: `scripts/rilascio/migra.sh <file>`.
+  3. Import dell'immagine in k3s e apply dei manifest: `scripts/rilascio/rilascia.sh <tag>` (fa anche test e build in locale).
+  4. Backup fuori VPS: `scripts/vps/crea-secret.sh offsite`, poi `kubectl apply -f k8s/backup-offsite-cronjob.yaml`.
 - **Verifica:**
   - `kubectl -n platform rollout status deployment/fatturazione-core`;
   - readiness `/readyz` (200 = pronto, 503 = DB non raggiungibile o modalità bloccata);

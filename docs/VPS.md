@@ -4,20 +4,20 @@ Stato letto dal server il: MAI (si riempie con lo script di sync)
 Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore della SPEC, commit fb69474). Nessun comando eseguito sul VPS.
 
 ## Cosa gira online
-- App e container: il servizio `fatturazione-core` NON è ancora scritto né deployato. Esistono solo infrastruttura DB, backup e pulizia. [DA VERIFICARE]
+- App e container: il servizio `fatturazione-core` è scritto (Fase 1, testato in locale) ma NON deployato. Sul VPS esistono solo infrastruttura DB, backup e pulizia. [DA VERIFICARE]
 - Cluster: k3s, namespace `platform`
 - Postgres: `services-postgres` (Postgres 16.11), Service headless, porta 5432; DB `fatturazione`; ruoli `fatturazione` (owner, solo migrazioni/backup/pulizia) e `fatturazione_app` (servizio)
 - Secret esistente: `fatturazione-secrets` (ns `platform`), chiavi: PG_USER, PG_PASS, PG_DB, APP_PG_USER, APP_PG_PASS
 - CronJob: `fatturazione-backup` (03:40 Europe/Rome, pg_dump -Fc, retention 30 gg, PVC `fatturazione-backup` 500 Mi `local-path`), `fatturazione-pulizia` (03:20)
 - Altri servizi nel namespace: n8n (`N8N_HOST=n8n.spaziocliente.it`), Keycloak (namespace e URL [DA VERIFICARE])
 - Accesso: IP 185.229.239.205, alias SSH `vps-se` (sul Mac di Elia), utente `elia`, chiave con passphrase. Utenti dedicati agli agenti: da costruire (docs/accessi-da-creare.md)
-- Ricognizione in sola lettura: `ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh`
+- Ricognizione in sola lettura: `ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh 2>&1 | tee ~/ricognizione.txt`
 - Cartella sul server: [DA VERIFICARE]
 - Dominio o URL del servizio: `gestione.gazzolaelia.it` (decisione #19), solo `/webhooks/stripe` e `/webhooks/gocardless` pubblici; non ancora configurato
 - Commit o tag deployato: nessuno (servizio non deployato) [DA VERIFICARE]
 
 ## Deploy e rollback
-- Deploy: manuale, lo esegue solo Elia con la chiave `claude-deploy` (passphrase = approvazione). Manifest k8s previsti in `k8s/` (non ancora presenti). docs/deploy.manifest.md non esiste ancora.
+- Deploy: manuale, lo esegue solo Elia con la chiave `claude-deploy` (passphrase = approvazione). Manifest in `k8s/`, passi in docs/deploy.manifest.md, script in `scripts/rilascio/`. Nessun registry: immagine importata in k3s (decisione #23).
 - Rollback: [DA VERIFICARE]
 
 Note: il backup è sullo stesso disco del VPS; copia fuori dal VPS ancora da fare. `local-path` non applica la quota del PVC. n8n usa il superutente `services` e può leggere `fatturazione` (buco noto).

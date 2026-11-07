@@ -22,6 +22,9 @@ export interface Payload {
   cliente: Record<string, unknown>;
   righe: { descrizione: string; importo: number }[];
   rata?: string;
+  versione?: number;
+  rif_proforma?: string;
+  note?: string;
   dati_fonte?: Record<string, unknown>;
 }
 
@@ -104,6 +107,27 @@ export async function cambiaStato(
     ]);
     return u.rows[0]!;
   });
+}
+
+export async function storico(pool: pg.Pool, ref: string) {
+  const r = await pool.query(
+    `SELECT s.quando, s.da_stato, s.a_stato, s.dettaglio FROM storico s JOIN documenti d ON d.id = s.documento_id
+     WHERE d.ref = $1 ORDER BY s.id`,
+    [ref],
+  );
+  return r.rows;
+}
+
+/** Riepilogo per la dashboard: conteggi, ultimi numeri, cose che richiedono attenzione. Nessuna PII. */
+export async function riepilogo(pool: pg.Pool, riservatoMaxOre: number) {
+  const [conteggi, ultimi, vecchi, sospesi, rec] = await Promise.all([
+    pool.query(`SELECT anno, tipo, stato, count(*)::int AS n FROM documenti GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3`),
+    pool.query(`SELECT anno, tipo, max(numero)::int AS ultimo FROM documenti GROUP BY 1, 2 ORDER BY 1 DESC, 2`),
+    pool.query(`SELECT ref, tipo, anno, numero, data_riserva FROM documenti WHERE stato = 'riservato' AND data_riserva < now() - make_interval(hours => $1) ORDER BY id LIMIT 50`, [riservatoMaxOre]),
+    pool.query(`SELECT fonte, count(*)::int AS n FROM eventi_ricevuti WHERE NOT elaborato AND ricevuto_il < now() - interval '15 minutes' GROUP BY 1`),
+    pool.query(`SELECT ${CAMPI_LEGGERI} FROM documenti ORDER BY id DESC LIMIT 20`),
+  ]);
+  return { conteggi: conteggi.rows, ultimi: ultimi.rows, riservati_vecchi: vecchi.rows, eventi_in_sospeso: sospesi.rows, recenti: rec.rows };
 }
 
 /** Task ClickUp rigenerata: lo stato non cambia, si aggiorna l'ID e si lascia traccia in storico. */

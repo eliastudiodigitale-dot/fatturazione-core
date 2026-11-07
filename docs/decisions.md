@@ -25,5 +25,10 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #18 | 2026-11-07 | Ref dashboard = `dashboard\|<id>\|<tipo>`; invoice Stripe a importo zero non generano documenti; senza `metadata.business` non si emette (fail closed); l'annullo non modifica la task ClickUp, lo segnala la riconciliazione | regole mancanti nella SPEC | utente (default proposto dall'agente)
 #19 | 2026-11-07 | Host pubblico del servizio: `gestione.gazzolaelia.it` (dominio `gazzolaelia.it`); niente sottodomini generici tipo `api.`/`webhook.`, già usati da altri servizi | evitare conflitti | utente
 #20 | 2026-11-07 | n8n chiama l'API con token Bearer statico (`N8N_TOKEN`); OAuth/Keycloak eventualmente in Fase 3 | già implementato e testato, nessuna dipendenza da Keycloak | agente (delegato da Elia: "come vuoi")
+#21 | 2026-11-07 | Notifiche anomalie via bot Telegram dedicato (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID); senza configurazione restano solo nei log | gratis, immediato, una chiamata HTTPS | utente (proposta A dell'agente)
+#22 | 2026-11-07 | Copia backup fuori VPS su Backblaze B2 con Object Lock, dump cifrati prima dell'invio (rclone crypt), CronJob dopo il backup notturno | dump < 20 MB, costo ~0, protegge anche da VPS compromesso | utente (proposta A dell'agente)
+#23 | 2026-11-07 | Nessun registry: l'immagine si compila sul Mac e si importa in k3s (`k3s ctr images import`), tag fisso, imagePullPolicy Never | costo zero, nessuna credenziale in più | utente (proposta A dell'agente)
+#24 | 2026-11-07 | Nota di credito: nuovo tipo con numerazione propria, con migrazione dello schema, in Fase 2 insieme all'XML SDI | correzione fatture (decisione #9) | utente
+#25 | 2026-11-07 | Scelta del provider SDI: ricerca dedicata (/ricerca) in una sessione separata | Fase 2 | utente
 
 Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.

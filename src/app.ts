@@ -4,8 +4,8 @@ import type { Config, Tipo } from './config.js';
 import { creaVerificaToken, type Chiamante } from './auth.js';
 import { creaRateLimit } from './ratelimit.js';
 import type { Blocco } from './blocco.js';
-import { controllaBusta, payloadDaBusta, schemaBusta, type Busta } from './busta.js';
-import { cambiaStato, elenco, ErroreStato, perRef, riserva, vistaLeggera } from './documenti.js';
+import { avvisiBusta, canonico, controllaBusta, payloadDaBusta, schemaBusta, type Busta } from './busta.js';
+import { cambiaStato, elenco, ErroreStato, perRef, riepilogo, riserva, storico, vistaLeggera } from './documenti.js';
 import type { Stato } from './stati.js';
 import type { Eventi } from './eventi.js';
 import type { StripeApi } from './stripe.js';
@@ -45,6 +45,8 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
   });
   const verifica = creaVerificaToken(cfg.tokens);
   const limite = creaRateLimit(cfg.rateLimitPerMin);
+  // I webhook arrivano a raffiche (rinvii Stripe, batch GoCardless): limite più largo, separato dalle API.
+  const limiteWebhook = creaRateLimit(cfg.rateLimitPerMin * 5);
 
   app.addHook('onSend', async (_req, reply) => {
     reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -93,13 +95,36 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
     async (req, reply) => {
       const b = req.body;
       const errore = controllaBusta(b, req.chiamante!);
-      if (errore) return reply.code(400).send({ errore });
-      const d = await riserva(pool, { ref: b.ref, tipo: b.tipo, fonte: b.fonte, business: b.business ?? null, payload: payloadDaBusta(b) });
-      if (d.tipo !== b.tipo) return reply.code(409).send({ errore: 'ref già usata con un altro tipo' });
+      if (errore) return reply.code(400).send({ errore, codice: 'busta_non_valida' });
+      if (b.rif_proforma) {
+        const p = await perRef(pool, b.rif_proforma);
+        if (!p || p.tipo !== 'proforma') return reply.code(400).send({ errore: 'rif_proforma: proforma inesistente', codice: 'proforma_inesistente' });
+        if (p.stato === 'annullato') return reply.code(400).send({ errore: 'rif_proforma: proforma annullata', codice: 'proforma_annullata' });
+      }
+      const payload = payloadDaBusta(b);
+      const d = await riserva(pool, { ref: b.ref, tipo: b.tipo, fonte: b.fonte, business: b.business, payload });
+      // Stessa ref = stesso documento. Se i dati sono diversi non si sovrascrive nulla: lo si dice al chiamante.
+      if (d.tipo !== b.tipo || d.fonte !== b.fonte || canonico(d.payload) !== canonico(payload) || d.business !== b.business) {
+        req.log.warn({ ref: d.ref, numero: d.numero }, 'ref già usata con dati diversi');
+        return reply.code(409).send({ errore: 'ref già usata con dati diversi: il documento esistente non è stato modificato', codice: 'ref_con_dati_diversi', documento: vistaLeggera(d) });
+      }
+      if (d.stato === 'annullato')
+        return reply.code(409).send({ errore: 'documento annullato: per rifarlo inviare la stessa busta con "versione" (2, 3, ...)', codice: 'ref_annullata', documento: vistaLeggera(d) });
       req.log.info({ ref: d.ref, numero: d.numero, anno: d.anno, tipo: d.tipo }, 'riserva');
-      return vistaLeggera(d);
+      return { ...vistaLeggera(d), avvisi: avvisiBusta(b) };
     },
   );
+
+  app.get('/v1/riepilogo', { preHandler: autentica(tutti) }, async () => ({
+    servizio: { bloccato: blocco.bloccato, motivo: blocco.bloccato ? blocco.motivo : null },
+    ...(await riepilogo(pool, cfg.riconciliazione.riservatoMaxOre)),
+  }));
+
+  app.get<{ Params: { ref: string } }>('/v1/documenti/:ref/storico', { preHandler: autentica(tutti) }, async (req, reply) => {
+    const d = await perRef(pool, req.params.ref);
+    if (!d) return reply.code(404).send({ errore: 'documento non trovato' });
+    return { ref: d.ref, storico: await storico(pool, d.ref) };
+  });
 
   app.get<{ Params: { ref: string } }>('/v1/documenti/:ref', { preHandler: autentica(tutti) }, async (req, reply) => {
     const d = await perRef(pool, req.params.ref);
@@ -180,7 +205,7 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
 
     wh.post('/webhooks/stripe', async (req, reply) => {
       if (!deps.stripe || !cfg.pagamentiTipo) return reply.code(404).send();
-      if (!limite('webhook:stripe')) return reply.code(429).send();
+      if (!limiteWebhook('stripe')) return reply.code(429).send();
       const firma = req.headers['stripe-signature'];
       let ev: Awaited<ReturnType<StripeApi['verifica']>>;
       try {
@@ -197,7 +222,7 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
 
     wh.post('/webhooks/gocardless', async (req, reply) => {
       if (!cfg.gocardless || !cfg.pagamentiTipo) return reply.code(404).send();
-      if (!limite('webhook:gocardless')) return reply.code(429).send();
+      if (!limiteWebhook('gocardless')) return reply.code(429).send();
       const body = req.body as Buffer;
       const firma = req.headers['webhook-signature'];
       if (!firmaGcValida(body, typeof firma === 'string' ? firma : undefined, cfg.gocardless.webhookSecret)) return reply.code(498).send();

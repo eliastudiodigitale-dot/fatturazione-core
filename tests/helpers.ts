@@ -6,7 +6,7 @@ import { Blocco } from '../src/blocco.js';
 import { creaApp, opzioniLogger } from '../src/app.js';
 import { creaEventi, type Elaboratore } from '../src/eventi.js';
 import type { Notificatore } from '../src/notifiche.js';
-import type { ClickUpApi, NuovaTask, TaskInfo } from '../src/clickup.js';
+import { ErroreClickUp, type ClickUpApi, type NuovaTask, type TaskInfo } from '../src/clickup.js';
 import type { StripeApi } from '../src/stripe.js';
 import { ENV_TEST, PORTA } from './setup/env.js';
 
@@ -77,6 +77,8 @@ export class ClickUpFinto implements ClickUpApi {
   giu = false;
   /** Lancia dopo aver creato la task (simula pod ucciso / conferma persa). */
   crashDopoCreazione = false;
+  /** Liste che ClickUp rifiuta con 400 (ID sbagliato). */
+  rifiutaLista = new Set<string>();
   chiamate = 0;
   private seq = 0;
   private check() {
@@ -85,10 +87,12 @@ export class ClickUpFinto implements ClickUpApi {
   }
   async cercaPerChiave(listId: string, chiave: string) {
     this.check();
+    if (this.rifiutaLista.has(listId)) throw new ErroreClickUp(400, 'lista non valida');
     return [...this.task].filter(([, v]) => v.lista === listId && v.chiave === chiave).map(([k]) => k);
   }
   async creaTask(listId: string, t: NuovaTask) {
     this.check();
+    if (this.rifiutaLista.has(listId)) throw new ErroreClickUp(400, 'lista non valida');
     const id = `t${++this.seq}`;
     const chiave = String(t.campi.find((c) => c.id === 'campo-chiave')?.value ?? '');
     this.task.set(id, { lista: listId, chiave, t, collegati: [] });

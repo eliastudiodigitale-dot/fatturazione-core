@@ -4,7 +4,7 @@ import Stripe from 'stripe';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { creaStripe, elaboratoreStripe, type StripeApi } from '../src/stripe.js';
 import { elaboratoreGc, type GcApi } from '../src/gocardless.js';
-import { admin, aspetta, costruisci, logMuto, poolApp, svuota } from './helpers.js';
+import { admin, aspetta, costruisci, logMuto, notificheFinte, poolApp, svuota } from './helpers.js';
 import { ENV_TEST } from './setup/env.js';
 
 const pool = poolApp();
@@ -19,7 +19,7 @@ function stripeFinto(o: { piHaFattura?: boolean } = {}): StripeApi {
   return {
     verifica: vera.verifica, // verifica firma reale della libreria ufficiale
     piHaFattura: async () => o.piHaFattura ?? false,
-    righeFattura: async () => [{ descrizione: 'Abbonamento', importo: 29 }],
+    righeFattura: async () => [{ descrizione: 'Abbonamento', centesimi: 2900 }],
     clienteDaCharge: async () => ({ nome: 'Cliente Stripe', email: 'c@example.com' }),
   };
 }
@@ -31,13 +31,14 @@ const conteggio = async (t: string) => (await admin.query(`SELECT count(*)::int 
 const invoicePaid = (evId: string, invId = 'in_1') => ({
   id: evId,
   type: 'invoice.paid',
-  data: { object: { id: invId, status: 'paid', amount_paid: 2900, currency: 'eur', metadata: { business: 'saas-a' }, customer_name: 'Cliente', customer_email: 'c@example.com', lines: { data: [{ description: 'Abbonamento', amount: 2900 }], has_more: false } } },
+  livemode: true,
+  data: { object: { id: invId, status: 'paid', amount_paid: 2900, total: 2900, currency: 'eur', metadata: { business: 'saas-a' }, customer_name: 'Cliente', customer_email: 'c@example.com', lines: { data: [{ description: 'Abbonamento', amount: 2900 }], has_more: false } } },
 });
 
 describe('webhook Stripe', () => {
   it('4. lo stesso evento ricevuto 3 volte -> un solo documento', async () => {
     const api = stripeFinto();
-    const { app, eventi } = await costruisci({ pool, stripe: api, elaboratori: { stripe: elaboratoreStripe({ pool, api, tipo: 'fattura', log: logMuto }) } });
+    const { app, eventi } = await costruisci({ pool, stripe: api, elaboratori: { stripe: elaboratoreStripe({ pool, api, tipo: 'fattura', log: logMuto, notif: notificheFinte(), livemode: true }) } });
     const body = JSON.stringify(invoicePaid('evt_1'));
     for (let i = 0; i < 3; i++) {
       const r = await app.inject({ method: 'POST', url: '/webhooks/stripe', headers: { 'stripe-signature': firmaStripe(body), 'content-type': 'application/json' }, payload: body });
@@ -69,15 +70,15 @@ describe('webhook Stripe', () => {
 
   it('payment_intent con invoice collegata viene ignorato (vale invoice.paid)', async () => {
     const api = stripeFinto({ piHaFattura: true });
-    const el = elaboratoreStripe({ pool, api, tipo: 'fattura', log: logMuto });
-    const esito = await el({ id: 'evt_pi', type: 'payment_intent.succeeded', data: { object: { id: 'pi_1', currency: 'eur', amount_received: 2900, metadata: { business: 'saas-a' }, latest_charge: 'ch_1' } } });
+    const el = elaboratoreStripe({ pool, api, tipo: 'fattura', log: logMuto, notif: notificheFinte(), livemode: true });
+    const esito = await el({ id: 'evt_pi', type: 'payment_intent.succeeded', livemode: true, data: { object: { id: 'pi_1', currency: 'eur', amount_received: 2900, metadata: { business: 'saas-a' }, latest_charge: 'ch_1' } } });
     expect(esito).toBe('fatto');
     expect(await conteggio('documenti')).toBe(0);
   });
 
   it('fail closed: business mancante -> nessun numero, evento resta da elaborare, anomalia', async () => {
     const api = stripeFinto();
-    const { app, notif } = await costruisci({ pool, stripe: api, elaboratori: { stripe: elaboratoreStripe({ pool, api, tipo: 'fattura', log: logMuto }) } });
+    const { app, notif } = await costruisci({ pool, stripe: api, elaboratori: { stripe: elaboratoreStripe({ pool, api, tipo: 'fattura', log: logMuto, notif: notificheFinte(), livemode: true }) } });
     const ev = invoicePaid('evt_nb');
     ev.data.object.metadata = {} as never;
     const body = JSON.stringify(ev);
@@ -95,13 +96,14 @@ describe('webhook GoCardless', () => {
     pagamento: async (id) => ({ id, status: stato, currency: 'EUR', amount: 5000, description: 'Rata', metadata: { business: 'saas-b' }, links: { mandate: 'MD1' } }),
     mandato: async () => ({ links: { customer: 'CU1' } }),
     cliente: async () => ({ id: 'CU1', given_name: 'Anna', family_name: 'Bianchi', email: 'a@example.com' }),
+    abbonamento: async () => ({ metadata: {} }),
     pagamentiPerStato: async () => [],
   });
   const firma = (b: string) => createHmac('sha256', ENV_TEST.GC_WEBHOOK_SECRET!).update(b).digest('hex');
   const batch = (ids: string[], pagamento = 'PM1') => JSON.stringify({ events: ids.map((id) => ({ id, resource_type: 'payments', action: 'confirmed', links: { payment: pagamento } })) });
 
   it('4. batch ripetuto 3 volte -> un solo documento; 204', async () => {
-    const { app } = await costruisci({ pool, elaboratori: { gocardless: elaboratoreGc({ pool, api: gcApi(), tipo: 'fattura', trigger: 'confirmed' }) } });
+    const { app } = await costruisci({ pool, elaboratori: { gocardless: elaboratoreGc({ pool, api: gcApi(), tipo: 'fattura', trigger: 'confirmed', notif: notificheFinte() }) } });
     const body = batch(['EV1', 'EV2']); // due eventi sullo stesso pagamento
     for (let i = 0; i < 3; i++) {
       const r = await app.inject({ method: 'POST', url: '/webhooks/gocardless', headers: { 'webhook-signature': firma(body), 'content-type': 'application/json' }, payload: body });
@@ -122,9 +124,11 @@ describe('webhook GoCardless', () => {
     await app.close();
   });
 
-  it('stato corrente non coerente (es. charged_back) -> nessun documento', async () => {
-    const el = elaboratoreGc({ pool, api: gcApi('charged_back'), tipo: 'fattura', trigger: 'confirmed' });
-    await expect(el({ id: 'EV9', resource_type: 'payments', action: 'confirmed', links: { payment: 'PM9' } })).rejects.toThrow('gc_stato_incoerente');
+  it('stato corrente non coerente (es. charged_back) -> nessun documento, anomalia', async () => {
+    const notif = notificheFinte();
+    const el = elaboratoreGc({ pool, api: gcApi('charged_back'), tipo: 'fattura', trigger: 'confirmed', notif });
+    expect(await el({ id: 'EV9', resource_type: 'payments', action: 'confirmed', links: { payment: 'PM9' } })).toBe('fatto');
+    expect(notif.lista[0]!.codice).toBe('gc_stato_incoerente');
     expect(await conteggio('documenti')).toBe(0);
   });
 });

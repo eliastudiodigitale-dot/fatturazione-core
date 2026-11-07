@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Ricognizione in SOLA LETTURA del VPS per fatturazione-core. Non modifica nulla e non stampa valori segreti.
-# Uso dal Mac:  ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh > ricognizione.txt
-# Poi incolla ricognizione.txt nella sessione.
+# Uso dal Mac (mostra a schermo E salva in ~/ricognizione.txt):
+#   cd /Users/elia/offline/REPO-locali/fatturazione-core && ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh 2>&1 | tee ~/ricognizione.txt
 set -u
+echo "INIZIO ricognizione $(date -Is) su $(hostname)"
+echo "utente: $(id -un)  architettura: $(uname -m)  sudo senza password: $(sudo -n true 2>/dev/null && echo si || echo no)"
+echo "comandi: kubectl=$(command -v kubectl || echo no) k3s=$(command -v k3s || echo no) jq=$(command -v jq || echo no) curl=$(command -v curl || echo no)"
 
 K=kubectl
 if ! $K get ns >/dev/null 2>&1; then K="sudo -n k3s kubectl"; fi

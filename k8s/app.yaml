@@ -25,8 +25,8 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: app
-          image: REGISTRY_DA_DEFINIRE/fatturazione-core:0.1.0   # [DA DEFINIRE] registry; tag fisso, mai latest
-          imagePullPolicy: IfNotPresent
+          image: fatturazione-core:0.1.0   # importata in k3s, nessun registry (decisione #23); tag fisso, mai latest
+          imagePullPolicy: Never
           ports:
             - {name: http, containerPort: 8080}
           envFrom:
@@ -81,10 +81,15 @@ data:
   PG_HOST: services-postgres
   PG_PORT: "5432"
   PG_SSL: "DA_DEFINIRE"            # disable | require | verify-full  [DA VERIFICARE se services-postgres ha SSL]; valore non valido = il pod non parte
+                                   # con verify-full serve anche PG_CA_FILE (CA montata da un Secret) [DA VERIFICARE]
   FORZA_BLOCCO: "false"            # "true" dopo un ripristino del DB (SPEC 7)
   RATE_LIMIT_PER_MIN: "120"
   BODY_LIMIT: "65536"
   PAGAMENTI_TIPO_DOCUMENTO: "fattura"   # decisione #15
+  STRIPE_LIVEMODE: "true"          # in produzione gli eventi Stripe di test vengono ignorati
+  STRIPE_BUSINESS_PREDEFINITO: ""  # business se l'evento non ha metadata.business (es. un account Stripe = un business)
+  GC_BUSINESS_PREDEFINITO: ""      # idem per GoCardless
+  TELEGRAM_CHAT_ID: ""             # chat che riceve le anomalie (il token del bot sta nel Secret)
   GC_TRIGGER_ACTION: ""            # [DA DECIDERE col commercialista] confirmed | paid_out; vuoto = GoCardless spento
   CLICKUP_LIST_ID_FATTURA: ""      # [DA DEFINIRE]
   CLICKUP_LIST_ID_PROFORMA: ""     # [DA DEFINIRE]
