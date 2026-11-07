@@ -17,5 +17,11 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #10 | 2026-11-07 | Il servizio usa solo il ruolo `fatturazione_app`; le migrazioni girano come Job separato con il ruolo owner `fatturazione` | minimo privilegio | utente (SPEC sez. 3.2 e 8, fb69474)
 #11 | 2026-11-07 | Stack del servizio: TypeScript/Node con Fastify e `pg` (chiude il punto aperto SPEC sez. 12 "stack") | coerente con la dashboard Next.js | utente (confermato da Elia)
 #12 | 2026-11-07 | Runtime Node 24 (LTS, sul Mac installata insieme alla 20) | scelta di Elia | utente
+#13 | 2026-11-07 | Migrazione 003 approvata: `fatturazione_app` può leggere (solo SELECT) `contatori`; la applica Elia col Job di migrazione | controllo all'avvio e riconciliazione devono leggere il contatore | utente (default proposto dall'agente)
+#14 | 2026-11-07 | Migrazione 004 approvata: in `riserva_numero` data e anno si prendono con clock_timestamp() dopo il lock; la applica Elia | con 001 numero e data potevano invertirsi (viola #5), riprodotto dal test di concorrenza | utente (default proposto dall'agente)
+#15 | 2026-11-07 | I pagamenti Stripe e GoCardless generano una `fattura` (PAGAMENTI_TIPO_DOCUMENTO=fattura) | il pagamento è già incassato | utente (default proposto dall'agente)
+#16 | 2026-11-07 | Le task documento in ClickUp hanno un campo testo "chiave" = `<tipo>\|<anno>\|<numero>`; il worker cerca per chiave prima di creare | niente doppioni dopo timeout o crash | utente (default proposto dall'agente)
+#17 | 2026-11-07 | `PG_SSL` obbligatoria: `verify-full` se services-postgres ha SSL, altrimenti `disable` con traffico confinato dalla NetworkPolicy | nessuna scelta silenziosa sul trasporto | utente (default proposto dall'agente)
+#18 | 2026-11-07 | Ref dashboard = `dashboard\|<id>\|<tipo>`; invoice Stripe a importo zero non generano documenti; senza `metadata.business` non si emette (fail closed); l'annullo non modifica la task ClickUp, lo segnala la riconciliazione | regole mancanti nella SPEC | utente (default proposto dall'agente)
 
 Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.

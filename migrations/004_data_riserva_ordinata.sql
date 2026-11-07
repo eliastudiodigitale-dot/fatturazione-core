@@ -1,4 +1,4 @@
--- NON APPLICATO. Richiede approvazione di Elia (modifica della funzione di numerazione).
+-- APPROVATA il 2026-11-07 (decisione #14), NON ANCORA APPLICATA sul VPS: la applica Elia col Job di migrazione.
 -- Problema trovato dal test di concorrenza (SPEC 11.2): in 001 data_riserva = now() = inizio della
 -- transazione, mentre il numero viene assegnato DOPO l'attesa del lock su contatori. Con richieste
 -- concorrenti la fattura n+1 può avere data_riserva precedente alla n (violata decisione #5); a cavallo
