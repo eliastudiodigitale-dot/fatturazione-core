@@ -79,7 +79,7 @@ async function sistema(o: { gc?: GcApi; stripe?: StripeApi; cfg?: Record<string,
     stripe: sApi,
     sbloccato: o.sbloccato,
     elaboratori: {
-      stripe: elaboratoreStripe({ pool, api: sApi, tipo: 'fattura', log: logMuto, notif, livemode: cfg.stripe!.livemode, businessPredefinito: cfg.stripe!.businessPredefinito }),
+      stripe: elaboratoreStripe({ pool, api: sApi, tipo: 'fattura', log: logMuto, notif, livemode: cfg.stripe!.livemode, businessPredefinito: cfg.stripe!.businessPredefinito, businessPerAccount: cfg.stripe!.businessPerAccount, chiaveOrganizzazione: cfg.stripe!.chiaveOrganizzazione }),
       gocardless: elaboratoreGc({ pool, api: o.gc ?? gcApi(), tipo: 'fattura', trigger: 'confirmed', notif, businessPredefinito: cfg.gocardless!.businessPredefinito }),
     },
   });
@@ -576,6 +576,53 @@ describe('Avvio con lo storico reale (numeri a mano 2025 e 2026, contatore riall
     expect((await post(app, bustaClickup('N1', { tipo: 'proforma' }))).json().numero).toBe(16);
     const r = await riconcilia({ pool, notif: notificheFinte(), log: logMuto, riservatoMaxOre: 24 });
     expect(r.buchi).toEqual([]); // 1..15 sono a mano: non sono buchi
+    await app.close();
+  });
+});
+
+describe('Stripe con organizzazione (un account per attività, chiave sk_org_)', () => {
+  const ORG = { STRIPE_API_KEY: 'sk_org_live_prova', STRIPE_BUSINESS_PER_ACCOUNT: 'acct_SERR=serrandasu.it,acct_HEY=heyciar.it,acct_GAZ=gazzolaelia.it' };
+  const chiamate: (string | undefined)[] = [];
+  const apiOrg: StripeApi = {
+    verifica: vera.verifica,
+    piHaFattura: async (_id, ctx) => { chiamate.push(ctx); return false; },
+    righeFattura: async (_id, ctx) => { chiamate.push(ctx); return [{ descrizione: 'Piano', centesimi: 2900 }]; },
+    clienteDaCharge: async (_id, ctx) => { chiamate.push(ctx); return { nome: 'Cliente Org' }; },
+    businessDaProdotto: async () => 'non-deve-servire',
+  };
+  const invia = (app: Awaited<ReturnType<typeof costruisci>>['app'], ev: unknown) => {
+    const b = JSON.stringify(ev);
+    return app.inject({ method: 'POST', url: '/webhooks/stripe', headers: { 'stripe-signature': firmaS(b) }, payload: b });
+  };
+
+  it('configurazione: chiave di organizzazione riconosciuta, mappa account -> attività', () => {
+    const c = cfgTest(ORG).stripe!;
+    expect(c.chiaveOrganizzazione).toBe(true);
+    expect(c.businessPerAccount).toEqual({ acct_SERR: 'serrandasu.it', acct_HEY: 'heyciar.it', acct_GAZ: 'gazzolaelia.it' });
+    expect(() => cfgTest({ STRIPE_BUSINESS_PER_ACCOUNT: 'serrandasu.it' })).toThrow(/STRIPE_BUSINESS_PER_ACCOUNT/);
+  });
+
+  it('l\'attività è quella dell\'account che ha incassato; le letture su Stripe usano quell\'account', async () => {
+    chiamate.length = 0;
+    const { app } = await sistema({ stripe: apiOrg, cfg: ORG });
+    await invia(app, invoice('in_o1', { metadata: {}, lines: { data: [], has_more: true } }, { context: 'acct_SERR' }));
+    await invia(app, { id: 'evt_pio', type: 'payment_intent.succeeded', livemode: true, context: 'acct_HEY', data: { object: { id: 'pi_o1', currency: 'eur', amount_received: 5000, metadata: {}, latest_charge: 'ch_o1' } } });
+    await elaborati(2);
+    expect((await q('SELECT ref, business, payload FROM documenti ORDER BY numero')).map((d) => [d.ref, d.business, d.payload.dati_fonte.stripe.account])).toEqual([
+      ['stripe|in_o1|fattura', 'serrandasu.it', 'acct_SERR'],
+      ['stripe|pi_o1|fattura', 'heyciar.it', 'acct_HEY'],
+    ]);
+    expect(new Set(chiamate)).toEqual(new Set(['acct_SERR', 'acct_HEY']));
+    await app.close();
+  });
+
+  it('evento senza account o di un account non in mappa: nessun numero, avviso', async () => {
+    const { app, notif } = await sistema({ stripe: apiOrg, cfg: ORG });
+    await invia(app, invoice('in_o2'));
+    await invia(app, invoice('in_o3', {}, { context: 'acct_ALTRO' }));
+    await aspetta(async () => notif.lista.length >= 2);
+    expect(notif.lista.map((n) => n.codice).sort()).toEqual(['stripe_account_sconosciuto', 'stripe_evento_senza_account']);
+    expect(await q('SELECT count(*)::int AS n FROM documenti')).toEqual([{ n: 0 }]);
     await app.close();
   });
 });

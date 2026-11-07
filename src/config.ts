@@ -14,7 +14,7 @@ export interface Config {
   pg: { host: string; port: number; database: string; user: string; password: string; ssl: PgSsl; caFile?: string };
   tokens: { n8n: string; dashboard: string; owner: string };
   pagamentiTipo?: Tipo;
-  stripe?: { webhookSecret: string; apiKey: string; livemode: boolean; businessPredefinito?: string };
+  stripe?: { webhookSecret: string; apiKey: string; livemode: boolean; businessPredefinito?: string; businessPerAccount: Record<string, string>; chiaveOrganizzazione: boolean };
   gocardless?: { webhookSecret: string; apiToken: string; trigger: GcTrigger; apiUrl: string; businessPredefinito?: string };
   telegram?: { token: string; chatId: string };
   clickup?: {
@@ -119,7 +119,22 @@ export function caricaConfig(env: Env = process.env): Config {
   const sk = opt(env, 'STRIPE_API_KEY');
   // STRIPE_LIVEMODE (default true): in produzione gli eventi di test vengono ignorati, e viceversa.
   const lm = oneOf(env, 'STRIPE_LIVEMODE', ['true', 'false'] as const) ?? 'true';
-  if (sws && sk) cfg.stripe = { webhookSecret: sws, apiKey: sk, livemode: lm === 'true', businessPredefinito: opt(env, 'STRIPE_BUSINESS_PREDEFINITO') };
+  // Organizzazione Stripe con un account per attività: STRIPE_BUSINESS_PER_ACCOUNT="acct_A=serrandasu.it,acct_B=heyciar.it"
+  const perAccount: Record<string, string> = {};
+  for (const coppia of (opt(env, 'STRIPE_BUSINESS_PER_ACCOUNT') ?? '').split(',').map((x) => x.trim()).filter(Boolean)) {
+    const m = /^(acct_[A-Za-z0-9]+)=([a-z0-9][a-z0-9._-]{0,63})$/.exec(coppia);
+    if (!m) throw new Error('valore non valido: STRIPE_BUSINESS_PER_ACCOUNT (formato acct_...=attività, separati da virgola)');
+    perAccount[m[1]!] = m[2]!;
+  }
+  if (sws && sk)
+    cfg.stripe = {
+      webhookSecret: sws,
+      apiKey: sk,
+      livemode: lm === 'true',
+      businessPredefinito: opt(env, 'STRIPE_BUSINESS_PREDEFINITO'),
+      businessPerAccount: perAccount,
+      chiaveOrganizzazione: sk.startsWith('sk_org_'),
+    };
 
   const tt = opt(env, 'TELEGRAM_BOT_TOKEN');
   const tc = opt(env, 'TELEGRAM_CHAT_ID');

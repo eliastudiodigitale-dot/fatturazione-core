@@ -24,7 +24,7 @@ const gc = cfg.gocardless ? creaGc(cfg.gocardless.apiUrl, cfg.gocardless.apiToke
 const clickup = cfg.clickup ? creaClickUp({ token: cfg.clickup.token, apiUrl: cfg.clickup.apiUrl, rpm: cfg.clickup.rpm, campi: cfg.clickup.campi }) : undefined;
 
 const elaboratori: Record<string, Elaboratore> = {};
-if (stripe && cfg.pagamentiTipo) elaboratori.stripe = elaboratoreStripe({ pool, api: stripe, tipo: cfg.pagamentiTipo, log: boot, notif, livemode: cfg.stripe!.livemode, businessPredefinito: cfg.stripe!.businessPredefinito });
+if (stripe && cfg.pagamentiTipo) elaboratori.stripe = elaboratoreStripe({ pool, api: stripe, tipo: cfg.pagamentiTipo, log: boot, notif, livemode: cfg.stripe!.livemode, businessPredefinito: cfg.stripe!.businessPredefinito, businessPerAccount: cfg.stripe!.businessPerAccount, chiaveOrganizzazione: cfg.stripe!.chiaveOrganizzazione });
 if (gc && cfg.gocardless && cfg.pagamentiTipo) elaboratori.gocardless = elaboratoreGc({ pool, api: gc, tipo: cfg.pagamentiTipo, trigger: cfg.gocardless.trigger, notif, businessPredefinito: cfg.gocardless.businessPredefinito });
 const eventi = creaEventi(pool, boot, notif, elaboratori, () => blocco.bloccato);
 

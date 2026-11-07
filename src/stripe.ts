@@ -14,13 +14,14 @@ type Obj = Record<string, any>;
 /** Ciò che serve da Stripe (chiave ristretta in sola lettura). Nei test si sostituisce. */
 export interface StripeApi {
   /** Verifica la firma sul body grezzo e restituisce l'evento; lancia se non valida. */
-  verifica(body: Buffer, firma: string): Promise<{ id: string; type: string; livemode?: boolean; account?: string; data: { object: unknown } }>;
+  verifica(body: Buffer, firma: string): Promise<{ id: string; type: string; livemode?: boolean; account?: string; context?: string; data: { object: unknown } }>;
+  // `ctx` = account dell'organizzazione su cui leggere (Stripe-Context), obbligatorio con la chiave di organizzazione.
   /** true se il payment_intent è collegato a una invoice (allora vale solo invoice.paid). */
-  piHaFattura(piId: string): Promise<boolean>;
-  righeFattura(invoiceId: string): Promise<RigaCent[]>;
-  clienteDaCharge(chargeId: string): Promise<Cliente>;
+  piHaFattura(piId: string, ctx?: string): Promise<boolean>;
+  righeFattura(invoiceId: string, ctx?: string): Promise<RigaCent[]>;
+  clienteDaCharge(chargeId: string, ctx?: string): Promise<Cliente>;
   /** metadata.business del prodotto Stripe (impostato una volta per prodotto). */
-  businessDaProdotto(productId: string): Promise<string | undefined>;
+  businessDaProdotto(productId: string, ctx?: string): Promise<string | undefined>;
 }
 
 /** ID dei prodotti delle righe di una invoice (campo diverso tra versioni API). */
@@ -52,26 +53,27 @@ export function idFiscaliStripe(ids: Obj[] | null | undefined) {
 
 export function creaStripe(apiKey: string, webhookSecret: string): StripeApi {
   const s = new Stripe(apiKey, { maxNetworkRetries: 2, timeout: 15_000 });
+  const opz = (ctx?: string) => (ctx ? { stripeContext: ctx } : {});
   return {
     async verifica(body, firma) {
       const ev = await s.webhooks.constructEventAsync(body, firma, webhookSecret);
       return ev as unknown as Awaited<ReturnType<StripeApi['verifica']>>;
     },
-    async piHaFattura(piId) {
-      const r = await s.invoicePayments.list({ payment: { type: 'payment_intent', payment_intent: piId }, limit: 1 });
+    async piHaFattura(piId, ctx) {
+      const r = await s.invoicePayments.list({ payment: { type: 'payment_intent', payment_intent: piId }, limit: 1 }, opz(ctx));
       return r.data.length > 0;
     },
-    async righeFattura(id) {
+    async righeFattura(id, ctx) {
       const out: RigaCent[] = [];
-      for await (const l of s.invoices.listLineItems(id, { limit: 100 })) out.push({ descrizione: l.description ?? 'Voce', centesimi: nettoRiga(l as unknown as Obj) });
+      for await (const l of s.invoices.listLineItems(id, { limit: 100 }, opz(ctx))) out.push({ descrizione: l.description ?? 'Voce', centesimi: nettoRiga(l as unknown as Obj) });
       return out;
     },
-    async businessDaProdotto(id) {
-      const p = await s.products.retrieve(id);
+    async businessDaProdotto(id, ctx) {
+      const p = await s.products.retrieve(id, {}, opz(ctx));
       return p.metadata?.business || undefined;
     },
-    async clienteDaCharge(chargeId) {
-      const ch = await s.charges.retrieve(chargeId);
+    async clienteDaCharge(chargeId, ctx) {
+      const ch = await s.charges.retrieve(chargeId, {}, opz(ctx));
       const b = ch.billing_details;
       return { nome: b.name ?? undefined, email: b.email ?? undefined, indirizzo: indirizzoStripe(b.address as Obj | null), stripe_customer: typeof ch.customer === 'string' ? ch.customer : (ch.customer?.id ?? undefined) };
     },
@@ -81,11 +83,25 @@ export function creaStripe(apiKey: string, webhookSecret: string): StripeApi {
 /** Eventi che non generano documenti ma richiedono una nota di credito o un controllo manuale. */
 const EVENTI_CORREZIONE = new Set(['charge.refunded', 'charge.dispute.created', 'credit_note.created', 'invoice.marked_uncollectible']);
 
-export function elaboratoreStripe(deps: { pool: pg.Pool; api: StripeApi; tipo: Tipo; log: FastifyBaseLogger; notif: Notificatore; livemode: boolean; businessPredefinito?: string }): Elaboratore {
+export function elaboratoreStripe(deps: {
+  pool: pg.Pool;
+  api: StripeApi;
+  tipo: Tipo;
+  log: FastifyBaseLogger;
+  notif: Notificatore;
+  livemode: boolean;
+  businessPredefinito?: string;
+  /** Un account Stripe per attività (organizzazione): l'account che ha incassato decide l'attività. */
+  businessPerAccount?: Record<string, string>;
+  /** Con la chiave di organizzazione ogni lettura va fatta "per conto" dell'account dell'evento. */
+  chiaveOrganizzazione?: boolean;
+}): Elaboratore {
   const euro = (c: number) => c / 100;
   return async (raw) => {
-    const ev = raw as { id: string; type: string; livemode?: boolean; account?: string; data: { object: Obj } };
+    const ev = raw as { id: string; type: string; livemode?: boolean; account?: string; context?: string; data: { object: Obj } };
     const o = ev.data.object;
+    const ctx = ev.context;
+    const perAccount = ctx ? deps.businessPerAccount?.[ctx] : undefined;
 
     // Eventi di test in produzione (o live in un ambiente di prova): mai un numero.
     if (Boolean(ev.livemode) !== deps.livemode) {
@@ -101,6 +117,11 @@ export function elaboratoreStripe(deps: { pool: pg.Pool; api: StripeApi; tipo: T
       return 'fatto';
     }
 
+    if ((ev.type === 'invoice.paid' || ev.type === 'payment_intent.succeeded') && deps.chiaveOrganizzazione && !ctx)
+      throw new Rifiuto('stripe_evento_senza_account', { evento: ev.id, azione: 'la destinazione degli eventi va creata a livello di organizzazione' });
+    if ((ev.type === 'invoice.paid' || ev.type === 'payment_intent.succeeded') && ctx && deps.businessPerAccount && Object.keys(deps.businessPerAccount).length && !perAccount)
+      throw new Rifiuto('stripe_account_sconosciuto', { evento: ev.id, account: ctx, azione: 'aggiungere l\'account a STRIPE_BUSINESS_PER_ACCOUNT' });
+
     if (ev.type === 'invoice.paid') {
       if (o.status !== 'paid') return 'fatto';
       const totale: number = o.total ?? 0;
@@ -112,18 +133,18 @@ export function elaboratoreStripe(deps: { pool: pg.Pool; api: StripeApi; tipo: T
       const iva = (o.tax ?? 0) + (o.total_taxes ?? []).reduce((s: number, t: Obj) => s + (t.amount ?? 0), 0);
       if (iva > 0) throw new Rifiuto('stripe_iva_presente', { invoice: o.id, azione: 'regime forfettario: togliere le tasse in Stripe' });
       if ((o.amount_paid ?? 0) !== totale) throw new Rifiuto('stripe_pagato_diverso_dal_totale', { invoice: o.id, pagato: o.amount_paid ?? 0, totale });
-      let business: string | null = o.metadata?.business ?? o.parent?.subscription_details?.metadata?.business ?? o.subscription_details?.metadata?.business ?? null;
+      let business: string | null = perAccount ?? o.metadata?.business ?? o.parent?.subscription_details?.metadata?.business ?? o.subscription_details?.metadata?.business ?? null;
       if (!business) {
         // Più attività sullo stesso account Stripe: metadata.business sul PRODOTTO, una volta sola.
         const prodotti = prodottiRighe(o.lines?.data ?? []);
-        const trovati = [...new Set((await Promise.all(prodotti.map((p) => deps.api.businessDaProdotto(p)))).filter(Boolean))] as string[];
+        const trovati = [...new Set((await Promise.all(prodotti.map((p) => deps.api.businessDaProdotto(p, ctx)))).filter(Boolean))] as string[];
         if (trovati.length > 1) throw new Rifiuto('stripe_business_ambiguo', { invoice: o.id, attivita: trovati.join(','), azione: 'una invoice deve riguardare una sola attività' });
         business = trovati[0] ?? deps.businessPredefinito ?? null;
       }
       if (!business) throw new Rifiuto('stripe_business_mancante', { invoice: o.id, azione: 'aggiungere metadata business al prodotto in Stripe' });
 
       let righe: RigaCent[] = (o.lines?.data ?? []).map((l: Obj) => ({ descrizione: l.description ?? 'Voce', centesimi: nettoRiga(l) }));
-      if (o.lines?.has_more || righe.length === 0) righe = await deps.api.righeFattura(o.id);
+      if (o.lines?.has_more || righe.length === 0) righe = await deps.api.righeFattura(o.id, ctx);
       const somma = righe.reduce((s, r) => s + r.centesimi, 0);
       if (somma !== totale) throw new Rifiuto('stripe_righe_diverse_dal_totale', { invoice: o.id, righe: somma, totale });
 
@@ -139,27 +160,27 @@ export function elaboratoreStripe(deps: { pool: pg.Pool; api: StripeApi; tipo: T
         tipo: deps.tipo,
         fonte: 'stripe',
         business,
-        payload: { cliente, righe: righe.map((r) => ({ descrizione: r.descrizione, importo: euro(r.centesimi) })), dati_fonte: { stripe: { invoice_id: o.id, numero_stripe: o.number ?? null } } },
+        payload: { cliente, righe: righe.map((r) => ({ descrizione: r.descrizione, importo: euro(r.centesimi) })), dati_fonte: { stripe: { invoice_id: o.id, numero_stripe: o.number ?? null, account: ctx ?? null } } },
       });
       return 'fatto';
     }
 
     if (ev.type === 'payment_intent.succeeded') {
       // Primo pagamento di un abbonamento: arrivano entrambi gli eventi; vale solo invoice.paid.
-      if (o.invoice || (await deps.api.piHaFattura(o.id))) return 'fatto';
+      if (o.invoice || (await deps.api.piHaFattura(o.id, ctx))) return 'fatto';
       if (String(o.currency).toLowerCase() !== 'eur') throw new Rifiuto('stripe_valuta_non_eur', { payment_intent: o.id });
       if (!(o.amount_received > 0)) return 'fatto';
-      const business = o.metadata?.business ?? deps.businessPredefinito ?? null;
+      const business = perAccount ?? o.metadata?.business ?? deps.businessPredefinito ?? null;
       if (!business) throw new Rifiuto('stripe_business_mancante', { payment_intent: o.id, azione: 'aggiungere metadata.business o STRIPE_BUSINESS_PREDEFINITO' });
       const charge = typeof o.latest_charge === 'string' ? o.latest_charge : o.latest_charge?.id;
       if (!charge) throw new Rifiuto('stripe_charge_mancante', { payment_intent: o.id });
-      const cliente = await deps.api.clienteDaCharge(charge);
+      const cliente = await deps.api.clienteDaCharge(charge, ctx);
       await riserva(deps.pool, {
         ref: `stripe|${o.id}|${deps.tipo}`,
         tipo: deps.tipo,
         fonte: 'stripe',
         business,
-        payload: { cliente, righe: [{ descrizione: o.description ?? 'Pagamento', importo: euro(o.amount_received) }], dati_fonte: { stripe: { payment_intent_id: o.id } } },
+        payload: { cliente, righe: [{ descrizione: o.description ?? 'Pagamento', importo: euro(o.amount_received) }], dati_fonte: { stripe: { payment_intent_id: o.id, account: ctx ?? null } } },
       });
       return 'fatto';
     }

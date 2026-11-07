@@ -6,7 +6,8 @@
 set -euo pipefail
 REF="${1:-}"; MOTIVO="${2:-}"
 [ -n "$REF" ] && [ "${#MOTIVO}" -ge 5 ] || { echo "uso: annulla.sh '<ref>' 'motivo (almeno 5 caratteri)'"; exit 1; }
-[[ "$REF" =~ \|proforma\| ]] || { echo "solo proforme: le fatture si correggono con nota di credito"; exit 1; }
+[[ "$REF" =~ ^[A-Za-z0-9_.:-]+\|(fattura|proforma)\|[A-Za-z0-9_-]+(\|v[0-9]+)?$ ]] || { echo "ref non valida: copiala esatta dall'elenco di scripts/rilascio/documenti.sh"; exit 1; }
+[[ "$REF" =~ \|proforma\| ]] || { echo "è una fattura: le fatture non si annullano, si correggono con nota di credito"; exit 1; }
 printf 'Annullo %s con motivo "%s"? Il numero NON tornerà libero. (scrivi SI) ' "$REF" "$MOTIVO"; read -r R
 [ "$R" = "SI" ] || { echo "annullato nulla"; exit 1; }
 REF_URI=$(jq -rn --arg r "$REF" '$r|@uri')
