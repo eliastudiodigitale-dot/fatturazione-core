@@ -15,8 +15,13 @@ ACCOUNTS=("")
 if [[ "$KEY" =~ ^sk_org_(live|test)_ ]]; then
   echo "Chiave di organizzazione: indica gli account su cui agire."
   echo "  (Stripe -> in alto il nome dell'organizzazione -> Account: ogni account ha un ID acct_...)"
-  printf 'ID account separati da spazio: '; read -r -a ACCOUNTS
-  for a in "${ACCOUNTS[@]}"; do [[ "$a" =~ ^acct_[A-Za-z0-9]+$ ]] || { echo "ID account non valido: $a"; exit 1; }; done
+  printf 'ID account separati da spazio (anche nella forma attività=acct_...): '; read -r -a GREZZI
+  ACCOUNTS=()
+  for a in "${GREZZI[@]}"; do
+    a="${a##*=}"  # "serrandasu.it=acct_..." -> "acct_..."
+    [[ "$a" =~ ^acct_[A-Za-z0-9]+$ ]] || { echo "ID account non valido: $a (atteso acct_...)"; exit 1; }
+    ACCOUNTS+=("$a")
+  done
   [ "${#ACCOUNTS[@]}" -gt 0 ] || { echo "nessun account"; exit 1; }
 elif ! [[ "$KEY" =~ ^(rk|sk)_(live|test)_ ]]; then
   echo "chiave non valida (attese: rk_live_..., sk_live_... o sk_org_live_...)"; exit 1
