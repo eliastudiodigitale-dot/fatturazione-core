@@ -1,19 +1,18 @@
-# Esposizione pubblica: solo /webhooks/* (Stripe, GoCardless). NON applicato.
-# L'API /v1 resta interna al cluster (n8n e dashboard nel namespace platform).
-# Host: gestione.gazzolaelia.it (decisione #19). [DA VERIFICARE] come vengono emessi i certificati sul VPS. Solo HTTPS.
-# Solo i due percorsi esatti dei webhook: il resto dell'host resta libero per altri servizi (es. dashboard in Fase 3).
+# Esposizione pubblica: solo i due webhook (Stripe, GoCardless). L'API /v1 resta interna al cluster.
+# Host: gestione.gazzolaelia.it (decisione #19). Certificato: Traefik, resolver "le" (Let's Encrypt via DNS Cloudflare),
+# lo stesso configurato sul VPS (ricognizione-2). Solo HTTPS: nessun router sull'entrypoint "web".
+# Solo i due percorsi esatti: il resto dell'host resta libero per altri servizi (es. dashboard in Fase 3).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: fatturazione-core-webhooks
   namespace: platform
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure   # [DA VERIFICARE] ingress controller in uso
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: le
 spec:
-  tls:
-    - hosts: [gestione.gazzolaelia.it]
-      secretName: TLS_DA_DEFINIRE
+  ingressClassName: traefik
   rules:
     - host: gestione.gazzolaelia.it
       http:

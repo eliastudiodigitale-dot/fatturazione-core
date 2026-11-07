@@ -25,7 +25,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: app
-          image: fatturazione-core:0.1.0   # importata in k3s, nessun registry (decisione #23); tag fisso, mai latest
+          image: fatturazione-core:0.1.1   # importata in k3s, nessun registry (decisione #23); tag fisso, mai latest
           imagePullPolicy: Never
           ports:
             - {name: http, containerPort: 8080}
@@ -94,7 +94,7 @@ data:
   # ClickUp: lista unica "proforme e fatture" (spazio P.Iva > Documenti) e i suoi campi esistenti
   CLICKUP_LIST_ID_FATTURA: "901518874514"
   CLICKUP_LIST_ID_PROFORMA: "901518874514"
-  CLICKUP_CAMPO_CHIAVE_ID: ""      # [DA LEGGERE] ID del campo "Chiave documento" (ricognizione-2). Finché è vuoto il pod NON parte.
+  CLICKUP_CAMPO_CHIAVE_ID: "15b011be-27c9-494e-ad07-0edbd1864098"          # Chiave documento (ricognizione-2)
   CLICKUP_CAMPO_ANNO_ID: "9f151028-e075-474c-b81f-caea96e7bdcf"            # Anno
   CLICKUP_CAMPO_NUMERO_FATTURA_ID: "b6cc96f9-c1a3-4254-b04c-19ace0b93955"  # nr-fattura
   CLICKUP_CAMPO_NUMERO_PROFORMA_ID: "c728c9f3-10c2-4e05-8fcd-055a3d1a09a9" # nr-proforma
