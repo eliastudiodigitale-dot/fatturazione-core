@@ -15,5 +15,7 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #8 | 2026-11-07 | Dati veri in ClickUp, DB piccolo: tetto 200 MB (500 MB assoluto), retention già impostata | contenere costi/spazio | utente (SPEC, fb69474)
 #9 | 2026-11-07 | Proforme non fiscali: un `annullato` non pesa. Per le fatture un numero annullato va giustificato [DA VERIFICARE col commercialista come documentarlo] | adempimento fiscale | utente (SPEC, fb69474)
 #10 | 2026-11-07 | Il servizio usa solo il ruolo `fatturazione_app`; le migrazioni girano come Job separato con il ruolo owner `fatturazione` | minimo privilegio | utente (SPEC sez. 3.2 e 8, fb69474)
+#11 | 2026-11-07 | Stack del servizio: TypeScript/Node con Fastify e `pg` (chiude il punto aperto SPEC sez. 12 "stack") | coerente con la dashboard Next.js | utente (confermato da Elia)
+#12 | 2026-11-07 | Runtime Node 24 (LTS, sul Mac installata insieme alla 20) | scelta di Elia | utente
 
-Aperte (non decise, vedi SPEC sez. 12): stack del servizio (consigliato TypeScript/Node con Fastify e `pg`, [DA CONFERMARE]), trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.
+Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.

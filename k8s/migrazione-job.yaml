@@ -1,0 +1,53 @@
+# Job di migrazione con il ruolo OWNER 'fatturazione' (decisione #10). NON applicato.
+# Esegue UN file alla volta, in una transazione, da una ConfigMap creata dal repo:
+#   kubectl -n platform create configmap fatturazione-migrazioni --from-file=migrations/ --dry-run=client -o yaml | kubectl apply -f -
+# Impostare MIGRAZIONE al file da applicare (es. 003_lettura_contatori.sql), poi applicare il Job.
+# 001 e 002 sono GIÀ applicati: non rieseguirli.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fatturazione-migrazione
+  namespace: platform
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: migra
+          image: postgres:16
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          env:
+            - name: MIGRAZIONE
+              value: "DA_IMPOSTARE.sql"
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_USER}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_PASS}}
+            - name: PGDATABASE
+              valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_DB}}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              case "$MIGRAZIONE" in 001_*|002_*) echo "001/002 già applicate: rifiuto"; exit 1;; esac
+              test -f "/migrazioni/$MIGRAZIONE"
+              psql -h services-postgres -v ON_ERROR_STOP=1 -1 -f "/migrazioni/$MIGRAZIONE"
+              echo "applicata: $MIGRAZIONE"
+          volumeMounts:
+            - {name: migrazioni, mountPath: /migrazioni, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: migrazioni
+          configMap: {name: fatturazione-migrazioni}
+        - name: tmp
+          emptyDir: {}

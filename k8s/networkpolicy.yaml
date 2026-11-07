@@ -1,0 +1,44 @@
+# Default deny per il pod fatturazione-core, poi solo il necessario (SPEC 8). NON applicato.
+# [DA VERIFICARE] le etichette reali: namespace dell'ingress controller (k3s: traefik in kube-system),
+# label dei pod n8n e di services-postgres (kubectl -n platform get pods --show-labels).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fatturazione-core
+  namespace: platform
+spec:
+  podSelector:
+    matchLabels: {app: fatturazione-core}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: traefik}   # [DA VERIFICARE]
+        - podSelector:
+            matchLabels: {app: n8n}                          # [DA VERIFICARE]
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels: {app: services-postgres}            # [DA VERIFICARE]
+      ports:
+        - {protocol: TCP, port: 5432}
+    # NetworkPolicy standard non filtra per nome host: api.clickup.com, api.stripe.com, api.gocardless.com
+    # sono consentiti come "qualunque IP pubblico su 443". Limite noto; per filtrare per FQDN servirebbe un CNI apposito.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+      ports:
+        - {protocol: TCP, port: 443}

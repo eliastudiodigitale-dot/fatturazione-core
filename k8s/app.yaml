@@ -1,0 +1,99 @@
+# fatturazione-core: Deployment + Service. NON applicato. Le voci [DA DEFINIRE]/[DA VERIFICARE] vanno chiuse prima.
+# Segreti: dal Secret esistente 'fatturazione-secrets' si prendono SOLO le chiavi dell'app (mai PG_USER/PG_PASS owner);
+# il resto dal nuovo Secret 'fatturazione-api-secrets' (vedi secret-api.example.yaml, solo nomi).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fatturazione-core
+  namespace: platform
+  labels: {app: fatturazione-core}
+spec:
+  replicas: 1            # una replica: rate limit in memoria; il lock Postgres protegge comunque worker e riconciliazione
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: fatturazione-core}
+  template:
+    metadata:
+      labels: {app: fatturazione-core}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: app
+          image: REGISTRY_DA_DEFINIRE/fatturazione-core:0.1.0   # [DA DEFINIRE] registry; tag fisso, mai latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8080}
+          envFrom:
+            - configMapRef: {name: fatturazione-core-config}
+            - secretRef: {name: fatturazione-api-secrets}
+          env:
+            - name: PG_DB
+              valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: PG_DB}}
+            - name: APP_PG_USER
+              valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: APP_PG_USER}}
+            - name: APP_PG_PASS
+              valueFrom: {secretKeyRef: {name: fatturazione-secrets, key: APP_PG_PASS}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fatturazione-core
+  namespace: platform
+  labels: {app: fatturazione-core}
+spec:
+  type: ClusterIP
+  selector: {app: fatturazione-core}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+# Configurazione NON segreta. Gli ID ClickUp sono un punto aperto (SPEC 12): finché mancano il worker resta spento.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fatturazione-core-config
+  namespace: platform
+data:
+  PG_HOST: services-postgres
+  PG_PORT: "5432"
+  PG_SSL: "DA_DEFINIRE"            # disable | require | verify-full  [DA VERIFICARE se services-postgres ha SSL]; valore non valido = il pod non parte
+  FORZA_BLOCCO: "false"            # "true" dopo un ripristino del DB (SPEC 7)
+  RATE_LIMIT_PER_MIN: "120"
+  BODY_LIMIT: "65536"
+  PAGAMENTI_TIPO_DOCUMENTO: ""     # [DA DECIDERE] fattura | proforma per Stripe/GoCardless; vuoto = webhook di pagamento spenti
+  GC_TRIGGER_ACTION: ""            # [DA DECIDERE col commercialista] confirmed | paid_out; vuoto = GoCardless spento
+  CLICKUP_LIST_ID_FATTURA: ""      # [DA DEFINIRE]
+  CLICKUP_LIST_ID_PROFORMA: ""     # [DA DEFINIRE]
+  CLICKUP_CAMPO_CHIAVE_ID: ""      # [DA DEFINIRE] campo testo "chiave" (<tipo>|<anno>|<numero>)
+  CLICKUP_CAMPO_NUMERO_ID: ""      # facoltativo
+  CLICKUP_CAMPO_BUSINESS_ID: ""    # facoltativo
+  CLICKUP_CAMPO_RATA_ID: ""        # facoltativo
+  CLICKUP_RPM: "100"               # [DA VERIFICARE] limite reale del workspace (100 o 1000)
+  WORKER_INTERNI_SEC: "90"
+  WORKER_ESTERNI_SEC: "2700"
+  RICONCILIAZIONE_ORA: "6"
+  RISERVATO_MAX_ORE: "24"

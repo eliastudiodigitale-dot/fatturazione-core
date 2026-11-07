@@ -1,0 +1,132 @@
+// Configurazione solo da variabili d'ambiente. I valori dei segreti non vengono mai loggati.
+
+export type Tipo = 'fattura' | 'proforma';
+export type PgSsl = 'disable' | 'require' | 'verify-full';
+export type GcTrigger = 'confirmed' | 'paid_out';
+
+export interface Config {
+  port: number;
+  bodyLimit: number;
+  rateLimitPerMin: number;
+  forzaBlocco: boolean;
+  pg: { host: string; port: number; database: string; user: string; password: string; ssl: PgSsl; caFile?: string };
+  tokens: { n8n: string; dashboard: string; owner: string };
+  pagamentiTipo?: Tipo;
+  stripe?: { webhookSecret: string; apiKey: string };
+  gocardless?: { webhookSecret: string; apiToken: string; trigger: GcTrigger; apiUrl: string };
+  clickup?: {
+    token: string;
+    apiUrl: string;
+    rpm: number;
+    listId: Record<Tipo, string>;
+    campi: { chiave: string; numero?: string; business?: string; rata?: string };
+  };
+  worker: { interniSec: number; esterniSec: number };
+  riconciliazione: { oraRoma: number; riservatoMaxOre: number };
+}
+
+type Env = Record<string, string | undefined>;
+
+function req(env: Env, k: string): string {
+  const v = env[k];
+  if (v === undefined || v === '') throw new Error(`variabile mancante: ${k}`);
+  return v;
+}
+function opt(env: Env, k: string): string | undefined {
+  const v = env[k];
+  return v === undefined || v === '' ? undefined : v;
+}
+function int(env: Env, k: string, def: number, min: number, max: number): number {
+  const raw = opt(env, k);
+  if (raw === undefined) return def;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`valore non valido: ${k}`);
+  return n;
+}
+function token(env: Env, k: string): string {
+  const v = req(env, k);
+  if (v.length < 32) throw new Error(`token troppo corto (min 32 caratteri): ${k}`);
+  return v;
+}
+function oneOf<T extends string>(env: Env, k: string, ammessi: readonly T[]): T | undefined {
+  const v = opt(env, k);
+  if (v === undefined) return undefined;
+  if (!(ammessi as readonly string[]).includes(v)) throw new Error(`valore non valido: ${k}`);
+  return v as T;
+}
+
+export function caricaConfig(env: Env = process.env): Config {
+  // PG_SSL è obbligatoria: lo stato SSL di services-postgres è un punto aperto e non si sceglie in silenzio.
+  const ssl = oneOf(env, 'PG_SSL', ['disable', 'require', 'verify-full'] as const);
+  if (!ssl) throw new Error('variabile mancante: PG_SSL');
+
+  const cfg: Config = {
+    port: int(env, 'PORT', 8080, 1, 65535),
+    bodyLimit: int(env, 'BODY_LIMIT', 65536, 1024, 1048576),
+    rateLimitPerMin: int(env, 'RATE_LIMIT_PER_MIN', 120, 1, 100000),
+    forzaBlocco: opt(env, 'FORZA_BLOCCO') === 'true',
+    pg: {
+      host: opt(env, 'PG_HOST') ?? 'services-postgres',
+      port: int(env, 'PG_PORT', 5432, 1, 65535),
+      database: req(env, 'PG_DB'),
+      user: req(env, 'APP_PG_USER'),
+      password: req(env, 'APP_PG_PASS'),
+      ssl,
+      caFile: opt(env, 'PG_CA_FILE'),
+    },
+    tokens: { n8n: token(env, 'N8N_TOKEN'), dashboard: token(env, 'DASHBOARD_TOKEN'), owner: token(env, 'OWNER_TOKEN') },
+    pagamentiTipo: oneOf(env, 'PAGAMENTI_TIPO_DOCUMENTO', ['fattura', 'proforma'] as const),
+    worker: {
+      interniSec: int(env, 'WORKER_INTERNI_SEC', 90, 30, 3600),
+      esterniSec: int(env, 'WORKER_ESTERNI_SEC', 2700, 60, 86400),
+    },
+    riconciliazione: {
+      oraRoma: int(env, 'RICONCILIAZIONE_ORA', 6, 0, 23),
+      riservatoMaxOre: int(env, 'RISERVATO_MAX_ORE', 24, 1, 720),
+    },
+  };
+
+  const sws = opt(env, 'STRIPE_WEBHOOK_SECRET');
+  const sk = opt(env, 'STRIPE_API_KEY');
+  if (sws && sk) cfg.stripe = { webhookSecret: sws, apiKey: sk };
+
+  const gws = opt(env, 'GC_WEBHOOK_SECRET');
+  const gtok = opt(env, 'GC_API_TOKEN');
+  const gtr = oneOf(env, 'GC_TRIGGER_ACTION', ['confirmed', 'paid_out'] as const);
+  if (gws && gtok && gtr) {
+    cfg.gocardless = { webhookSecret: gws, apiToken: gtok, trigger: gtr, apiUrl: opt(env, 'GC_API_URL') ?? 'https://api.gocardless.com' };
+  }
+
+  const ct = opt(env, 'CLICKUP_TOKEN');
+  const lf = opt(env, 'CLICKUP_LIST_ID_FATTURA');
+  const lp = opt(env, 'CLICKUP_LIST_ID_PROFORMA');
+  const cc = opt(env, 'CLICKUP_CAMPO_CHIAVE_ID');
+  if (ct && lf && lp && cc) {
+    cfg.clickup = {
+      token: ct,
+      apiUrl: opt(env, 'CLICKUP_API_URL') ?? 'https://api.clickup.com/api/v2',
+      rpm: int(env, 'CLICKUP_RPM', 100, 1, 10000),
+      listId: { fattura: lf, proforma: lp },
+      campi: {
+        chiave: cc,
+        numero: opt(env, 'CLICKUP_CAMPO_NUMERO_ID'),
+        business: opt(env, 'CLICKUP_CAMPO_BUSINESS_ID'),
+        rata: opt(env, 'CLICKUP_CAMPO_RATA_ID'),
+      },
+    };
+  }
+  return cfg;
+}
+
+/** Elenco di ciò che è attivo, senza valori: va bene per i log. */
+export function riassuntoConfig(c: Config): Record<string, unknown> {
+  return {
+    pgHost: c.pg.host,
+    pgSsl: c.pg.ssl,
+    forzaBlocco: c.forzaBlocco,
+    stripe: Boolean(c.stripe),
+    gocardless: c.gocardless ? c.gocardless.trigger : false,
+    clickup: Boolean(c.clickup),
+    pagamentiTipo: c.pagamentiTipo ?? null,
+  };
+}

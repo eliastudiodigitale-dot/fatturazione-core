@@ -1,0 +1,25 @@
+# Esposizione pubblica: solo /webhooks/* (Stripe, GoCardless). NON applicato.
+# L'API /v1 resta interna al cluster (n8n e dashboard nel namespace platform).
+# [DA DEFINIRE] host pubblico e certificato (cert-manager? secret TLS esistente?). Solo HTTPS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fatturazione-core-webhooks
+  namespace: platform
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure   # [DA VERIFICARE] ingress controller in uso
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  tls:
+    - hosts: [HOST_DA_DEFINIRE]
+      secretName: TLS_DA_DEFINIRE
+  rules:
+    - host: HOST_DA_DEFINIRE
+      http:
+        paths:
+          - path: /webhooks/
+            pathType: Prefix
+            backend:
+              service:
+                name: fatturazione-core
+                port: {name: http}
