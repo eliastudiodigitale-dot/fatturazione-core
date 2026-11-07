@@ -91,7 +91,10 @@ const JS_ERRORE = `const r = $input.first().json; // modalità "una volta per tu
 const d = typeof r.body === 'string' ? (() => { try { return JSON.parse(r.body); } catch { return {}; } })() : (r.body || {});
 const pack = $('Code in JavaScript').first().json;
 const errLocali = $('Busta per il servizio').first().json.errori || [];
-const motivo = errLocali.length ? errLocali.join('; ') : (d.errore || ('risposta ' + (r.statusCode ?? 'assente')));
+const motivo = errLocali.length ? errLocali.join('; ')
+  : !r.statusCode ? 'il servizio fatturazione-core non risponde (non ancora online o fermo). Nessun PDF inviato'
+  : r.statusCode === 503 ? 'il servizio è in modalità bloccata (controllo dei numeri non superato). Nessun PDF inviato'
+  : (d.errore || ('risposta ' + r.statusCode));
 const dati = errLocali.length > 0 || (r.statusCode >= 400 && r.statusCode < 500 && r.statusCode !== 429);
 // Servizio giù o lento: si riprova da soli ogni minuto; avviso al massimo una volta ogni 30 minuti.
 if (!dati) {
