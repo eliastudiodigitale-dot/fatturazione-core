@@ -35,5 +35,8 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #28 | 2026-11-07 | Stripe serve più attività (serrandasu.it, gazzolaelia.it, heyciar.it): l'attività si legge da metadata "business" su invoice/abbonamento o, se manca, sul prodotto; invoice con prodotti di attività diverse = bloccata | risposta di Elia + regola dell'agente | utente
 #29 | 2026-11-07 | Token ClickUp: si riusa quello di archportal002-secrets (CLICKUP_API_TOKEN), copiato lato server; limite 100/min condiviso, il servizio ne usa 40 | risposta di Elia nel Centro Fatturazione | utente
 #30 | 2026-11-07 | ClickUp: lista unica "proforme e fatture" (901518874514) con i campi esistenti; i numeri già usati a mano (Anno + nr-fattura/nr-proforma + checkbox) bloccano l'avvio finché il contatore non è riallineato | evitare numeri doppi con la numerazione manuale precedente | agente (da confermare)
+#31 | 2026-11-07 | La fattura nasce dalla proforma: stessa task in "proforme e fatture" (nr-fattura e t-fattura sulla task della proforma), non una task nuova | flusso attuale di Elia | utente
+#32 | 2026-11-07 | La proforma parte dal pulsante "inviapf" del progetto, come oggi | flusso attuale di Elia | utente
+#33 | 2026-11-07 | Causale e righe del documento calcolate come nel flusso attuale (auto_pro-forma +subtasks), da replicare dopo ricognizione-4 | flusso attuale di Elia | utente
 
 Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.
