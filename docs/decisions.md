@@ -3,7 +3,7 @@
 Solo decisioni in vigore. Se una cambia, si sovrascrive qui e la vecchia va in decisions-archivio.md con una riga.
 Formato: #N | data | decisione | motivo | chi (utente o agente)
 
-Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. Date = data della SPEC.
+Fonte: SPEC.md sez. 1 "Decisioni già prese" (#1-#10, commit fb69474; date = data della SPEC) e risposte di Elia nelle sessioni successive (#11-#37).
 
 #1 | 2026-11-07 | Il numero lo assegna il VPS alla ricezione, con contatore atomico per (anno, tipo). ClickUp non assegna né legge numeri | sequenza ufficiale unica e atomica | utente (SPEC, fb69474)
 #2 | 2026-11-07 | ClickUp è copia/vista; la sequenza ufficiale è nel DB `fatturazione` | evitare dipendenza da ClickUp per la numerazione | utente (SPEC, fb69474)
@@ -32,7 +32,6 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #25 | 2026-11-07 | Scelta del provider SDI: ricerca dedicata (/ricerca) in una sessione separata | Fase 2 | utente
 #26 | 2026-11-07 | GoCardless: la fattura nasce al versamento (GC_TRIGGER_ACTION=paid_out) | risposta di Elia nel Centro Fatturazione | utente
 #27 | 2026-11-07 | GoCardless serve una sola attività: GC_BUSINESS_PREDEFINITO=reti.gazzolaelia.it | risposta di Elia nel Centro Fatturazione | utente
-#28 | 2026-11-07 | Stripe serve più attività (serrandasu.it, gazzolaelia.it, heyciar.it): l'attività si legge da metadata "business" su invoice/abbonamento o, se manca, sul prodotto; invoice con prodotti di attività diverse = bloccata | risposta di Elia + regola dell'agente | utente
 #29 | 2026-11-07 | Token ClickUp: si riusa quello di archportal002-secrets (CLICKUP_API_TOKEN), copiato lato server; limite 100/min condiviso, il servizio ne usa 40 | risposta di Elia nel Centro Fatturazione | utente
 #30 | 2026-11-07 | ClickUp: lista unica "proforme e fatture" (901518874514) con i campi esistenti; i numeri già usati a mano (Anno + nr-fattura/nr-proforma + checkbox) bloccano l'avvio finché il contatore non è riallineato | evitare numeri doppi con la numerazione manuale precedente | agente (da confermare)
 #31 | 2026-11-07 | La fattura nasce dalla proforma: stessa task in "proforme e fatture" (nr-fattura e t-fattura sulla task della proforma), non una task nuova | flusso attuale di Elia | utente
@@ -41,6 +40,6 @@ Fonte di tutte le voci: SPEC.md sez. 1 "Decisioni già prese", commit fb69474. D
 #34 | 2026-11-07 | Proforme dal flusso n8n: il numero si prende PRIMA dell'approvazione su Telegram (deve stare nel PDF); con NO, tempo scaduto o email mancante il flusso annulla la proforma (resta un salto, ammesso per le proforme). Per questo il token n8n può annullare solo proforme proprie (fonte clickup) ancora in stato riservato | scelta di Elia; permesso minimo per realizzarla | utente (permesso n8n: agente, da confermare)
 #35 | 2026-11-07 | La task in "proforme e fatture" la crea il flusso n8n come oggi (nome F-progetto-anno, stato "pf inviata") con la Chiave documento, e conferma al servizio; il servizio la crea solo se dopo 45 minuti manca (WORKER_ATTESA_CLICKUP_MIN) | scelta di Elia | utente
 #36 | 2026-11-07 | La fattura elettronica oggi si emette con un programma/app esterno: il numero da usare lì sarà quello del servizio | risposta di Elia (Fase 2: integrazione SDI) | utente
-#37 | 2026-11-07 | Stripe è un'organizzazione con un account per attività e il servizio usa la chiave di organizzazione (sk_org_): l'attività della fattura è quella dell'account che ha incassato (STRIPE_BUSINESS_PER_ACCOUNT), ogni lettura su Stripe è fatta per conto di quell'account (Stripe-Context). Sostituisce i metadata sui prodotti della #28 | risposta di Elia | utente
+#37 | 2026-11-07 | Stripe è un'organizzazione con un account per attività e il servizio usa la chiave di organizzazione (sk_org_): l'attività della fattura è quella dell'account che ha incassato (STRIPE_BUSINESS_PER_ACCOUNT), ogni lettura su Stripe è fatta per conto di quell'account (Stripe-Context). Sostituisce la #28; resta come ripiego nel codice solo se l'account non è in mappa o ha più attività (metadata.business sul prodotto o sull'invoice) | risposta di Elia | utente
 
-Aperte (non decise, vedi SPEC sez. 12): trigger GoCardless, canale notifiche, destinazione copia backup, ruolo proprio per n8n.
+Aperte (non decise): ruolo DB proprio per n8n (SPEC sez. 12); permesso n8n di #34 e lista unica di #30 da confermare; chiave Stripe di organizzazione con scrittura piena (vedi STATO). Decise nel frattempo: trigger GoCardless (#26), canale notifiche (#21), destinazione copia backup (#22).

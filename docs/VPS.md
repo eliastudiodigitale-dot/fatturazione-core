@@ -14,7 +14,7 @@ Stato letto dal server il: 2026-11-07 (scripts/vps/ricognizione.sh, sola lettura
 Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore della SPEC, commit fb69474). Nessun comando eseguito sul VPS.
 
 ## Cosa gira online
-- App e container: il servizio `fatturazione-core` è scritto (Fase 1, testato in locale) ma NON deployato. Sul VPS esistono solo infrastruttura DB, backup e pulizia. [DA VERIFICARE]
+- App e container: `fatturazione-core` in produzione nel namespace `platform`, versione 0.1.2 (immagine importata in k3s), pod 1/1 Running, readyz pronto (verifica di Elia del 2026-11-07). Migrazioni 003 e 004 applicate, contatori 2026 riallineati (fattura 8, proforma 15). CronJob backup-offsite applicato.
 - Cluster: k3s, namespace `platform`
 - Postgres: `services-postgres` (Postgres 16.11), Service headless, porta 5432; DB `fatturazione`; ruoli `fatturazione` (owner, solo migrazioni/backup/pulizia) e `fatturazione_app` (servizio)
 - Secret esistente: `fatturazione-secrets` (ns `platform`), chiavi: PG_USER, PG_PASS, PG_DB, APP_PG_USER, APP_PG_PASS
@@ -23,8 +23,8 @@ Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore dell
 - Accesso: IP 185.229.239.205, alias SSH `vps-se` (sul Mac di Elia), utente `elia`, chiave con passphrase. Utenti dedicati agli agenti: da costruire (docs/accessi-da-creare.md)
 - Ricognizione in sola lettura: `ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh 2>&1 | tee ~/ricognizione.txt`
 - Cartella sul server: [DA VERIFICARE]
-- Dominio o URL del servizio: `gestione.gazzolaelia.it` (decisione #19), solo `/webhooks/stripe` e `/webhooks/gocardless` pubblici; non ancora configurato
-- Commit o tag deployato: nessuno (servizio non deployato) [DA VERIFICARE]
+- Dominio o URL del servizio: `gestione.gazzolaelia.it` (decisione #19), solo `/webhooks/stripe` e `/webhooks/gocardless` pubblici; certificato Traefik resolver `le`, HTTPS verificato (HTTP 404 a una GET) il 2026-11-07
+- Commit o tag deployato: immagine `fatturazione-core:0.1.2`, compilata dal Mac da commit locali non ancora su origin/main. 0.1.3 pronta, non rilasciata.
 
 ## Deploy e rollback
 - Deploy: manuale, lo esegue solo Elia con la chiave `claude-deploy` (passphrase = approvazione). Manifest in `k8s/`, passi in docs/deploy.manifest.md, script in `scripts/rilascio/`. Nessun registry: immagine importata in k3s (decisione #23).

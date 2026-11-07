@@ -1,13 +1,21 @@
-# Architettura (da SPEC.md)
+# Architettura (da SPEC.md e codice in src/)
 
 Servizio sul VPS che assegna in modo atomico e idempotente i numeri di proforme e fatture (una sola P.IVA forfettaria), riceve documenti da più fonti con un unico ingresso e li copia in ClickUp.
 
-- Numerazione: funzione SQL `riserva_numero(ref, tipo, fonte, business, payload)`, lock `FOR UPDATE` su `contatori(anno, tipo)`; stessa `ref` = stesso documento (SPEC sez. 3.1)
-- Tabelle: `contatori`, `documenti` (mai cancellabile), `storico` (append-only), `eventi_ricevuti` (dedupe webhook)
-- Permessi: l'app (`fatturazione_app`) non può cambiare `numero`/`ref`/`anno`/`tipo` né cancellare; ogni cambio di stato scrive `storico` nella stessa transazione
-- API REST JSON: `POST /v1/documenti`, `GET /v1/documenti[/{ref}]`, `POST /v1/documenti/{ref}/stato`, `POST /v1/documenti/{ref}/annulla` (token owner), `POST /webhooks/stripe`, `POST /webhooks/gocardless`, `/healthz`, `/readyz` (SPEC sez. 4)
-- Auth: Bearer per fonte; webhook con firma sul body grezzo
-- Stati: riservato → creato → inviato_sdi → consegnato; annullato da riservato/creato (sez. 5)
-- Worker ClickUp con advisory lock Postgres; riconciliazione giornaliera; modalità bloccata dopo perdita DB (sez. 6-7)
-- Fasi: 1 nucleo, 2 SDI, 3 dashboard (sez. 10)
-- Migrazioni previste: `migrations/001_schema.sql`, `002_permessi.sql` (lo schema è già applicato sul VPS, ma i file non sono ancora nel repo)
+- Numerazione: `riserva_numero(ref, tipo, fonte, business, payload)` con lock `FOR UPDATE` su `contatori(anno, tipo)`; stessa `ref` = stesso documento (SPEC sez. 3.1). Migrazione 004: data e anno presi con `clock_timestamp()` dopo il lock, così numero e data restano nello stesso ordine (decisioni #5, #14).
+- Tabelle: `contatori`, `documenti` (mai cancellabile), `storico` (append-only), `eventi_ricevuti` (dedupe webhook).
+- Migrazioni in `migrations/`: 001 schema, 002 permessi, 003 SELECT di `fatturazione_app` su `contatori`, 004 data_riserva ordinata. Applicate sul VPS da Elia con il Job di migrazione (owner `fatturazione`).
+- Permessi: l'app (`fatturazione_app`) non cambia `numero`/`ref`/`anno`/`tipo` e non cancella; ogni cambio di stato scrive `storico` nella stessa transazione.
+- API (Fastify):
+  - `POST /v1/documenti` (riserva, idempotente), `GET /v1/documenti/:ref`, `GET /v1/documenti/:ref/storico`
+  - `POST /v1/documenti/:ref/stato`, `POST /v1/documenti/:ref/annulla` (token owner; le fatture non si annullano, #9)
+  - `GET /v1/riepilogo`, `GET /healthz`, `GET /readyz` (503 in modalità bloccata)
+  - `POST /webhooks/stripe`, `POST /webhooks/gocardless` (firma sul body grezzo)
+- Auth: Bearer per fonte (token n8n, dashboard, owner), confronto a tempo costante; rate limit (`RATE_LIMIT_PER_MIN`).
+- Stripe: chiave di organizzazione (`sk_org_`) con un account per attività; le letture usano `Stripe-Context` (decisione #37). Invoice con prodotti di attività diverse = bloccata.
+- GoCardless: trigger `paid_out` (#26), una sola attività (#27).
+- Stati: riservato → creato → inviato_sdi → consegnato; annullato da riservato/creato (SPEC sez. 5).
+- Worker ClickUp: advisory lock Postgres, cerca per campo `chiave` prima di creare (#16); per i documenti da n8n aspetta 45 minuti che il workflow crei la task (#35).
+- Riconciliazione giornaliera (ore 6 Roma, `RICONCILIAZIONE_ORA`); modalità bloccata dopo perdita del DB o numeri storici non riallineati (#30).
+- Notifiche anomalie su Telegram (#21).
+- Fasi: 1 nucleo (fatto, in produzione 0.1.2), 2 SDI (nota di credito inclusa, #24), 3 dashboard e Keycloak (SPEC sez. 10).
