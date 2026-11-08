@@ -6,16 +6,30 @@
 # Chiave: una chiave RISTRETTA creata per l'occasione (Abbonamenti: Scrittura, Payment Link: Scrittura), da eliminare dopo,
 # oppure la chiave di ORGANIZZAZIONE (sk_org_live_...): in quel caso si indicano gli account (acct_...) su cui agire,
 # e ogni chiamata porta l'intestazione Stripe-Context con l'account.
-# La chiave si digita (non si vede), non finisce negli argomenti dei comandi né nella history.
+# La chiave: per default quella del servizio, letta dal Secret sul VPS (serve la passphrase SSH); con CHIAVE_A_MANO=1 si digita.
+# Non viene mai mostrata e non finisce negli argomenti dei comandi né nella history.
 set -euo pipefail
 MODO="${1:-elenca}"
 command -v jq >/dev/null || { echo "serve jq"; exit 1; }
-printf 'Chiave Stripe (rk_live_...): '; IFS= read -rs KEY; echo
+if [ "${CHIAVE_A_MANO:-}" = 1 ]; then
+  printf 'Chiave Stripe (rk_live_...): '; IFS= read -rs KEY; echo
+else
+  # Predefinito: la chiave del servizio, letta dal Secret sul VPS. Resta in una variabile, non viene mai mostrata.
+  echo "Leggo la chiave Stripe del servizio dal VPS (non viene mostrata). Per digitarla a mano: CHIAVE_A_MANO=1"
+  KEY=$(ssh vps-se "kubectl -n platform get secret fatturazione-api-secrets -o jsonpath='{.data.STRIPE_API_KEY}' | base64 -d")
+  [ -n "$KEY" ] || { echo "chiave non trovata nel Secret"; exit 1; }
+fi
 ACCOUNTS=("")
 if [[ "$KEY" =~ ^sk_org_(live|test)_ ]]; then
-  echo "Chiave di organizzazione: indica gli account su cui agire."
-  echo "  (Stripe -> in alto il nome dell'organizzazione -> Account: ogni account ha un ID acct_...)"
-  printf 'ID account separati da spazio (anche nella forma attività=acct_...): '; read -r -a GREZZI
+  # Account: quelli della configurazione del servizio (STRIPE_BUSINESS_PER_ACCOUNT in k8s/app.yaml)
+  CONF="$(dirname "$0")/../../k8s/app.yaml"
+  GREZZI=($(grep -E '^\s*STRIPE_BUSINESS_PER_ACCOUNT:' "$CONF" 2>/dev/null | grep -oE 'acct_[A-Za-z0-9]+' || true))
+  if [ "${#GREZZI[@]}" -gt 0 ]; then
+    echo "Account dalla configurazione del servizio: ${GREZZI[*]}"
+  else
+    echo "Chiave di organizzazione: indica gli account su cui agire."
+    printf 'ID account separati da spazio (anche nella forma attività=acct_...): '; read -r -a GREZZI
+  fi
   ACCOUNTS=()
   for a in "${GREZZI[@]}"; do
     a="${a##*=}"  # "serrandasu.it=acct_..." -> "acct_..."
@@ -77,4 +91,5 @@ done
 done
 if [ "$MODO" != "spegni" ]; then echo; echo "Solo elenco: nulla è stato cambiato. Per spegnere: scripts/stripe/tasse-automatiche.sh spegni"; fi
 unset KEY
-echo "Se hai creato una chiave apposta, ELIMINALA (Stripe -> Sviluppatori -> Chiavi API)."
+[ "${CHIAVE_A_MANO:-}" = 1 ] && echo "Se hai creato una chiave apposta, ELIMINALA (Stripe -> Sviluppatori -> Chiavi API)."
+exit 0
