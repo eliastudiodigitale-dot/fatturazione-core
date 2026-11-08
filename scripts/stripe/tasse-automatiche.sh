@@ -45,8 +45,10 @@ tutti() { # percorso base con parametri -> stampa gli oggetti uno per riga
 }
 for CTX in "${ACCOUNTS[@]}"; do
 [ -n "$CTX" ] && echo && echo "######## account $CTX"
-SUB=$(tutti "/subscriptions?status=all" | jq -c 'select(.automatic_tax.enabled == true and (.status | IN("active","trialing","past_due","unpaid","incomplete")))')
-PL=$(tutti "/payment_links?active=true" | jq -c 'select(.automatic_tax.enabled == true)')
+SUB=$(tutti "/subscriptions?status=all" | jq -c 'select(.automatic_tax.enabled == true and (.status | IN("active","trialing","past_due","unpaid","incomplete")))') \
+  || { echo "  (abbonamenti non leggibili con questa chiave su questo account: salto)"; SUB=""; }
+PL=$(tutti "/payment_links?active=true" | jq -c 'select(.automatic_tax.enabled == true)') \
+  || { echo "  (Payment Link non leggibili con questa chiave su questo account: salto)"; PL=""; }
 echo "== Abbonamenti con imposte automatiche accese: $(printf '%s' "$SUB" | grep -c . || true)"
 printf '%s\n' "$SUB" | jq -r 'select(. != null) | "  \(.id)  stato=\(.status)  cliente=\(.customer)"' 2>/dev/null || true
 echo "== Payment Link con imposte automatiche accese: $(printf '%s' "$PL" | grep -c . || true)"
