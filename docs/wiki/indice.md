@@ -1,6 +1,6 @@
 # Wiki fatturazione-core
 
-Stato: Fase 1 scritta, testata e in produzione (0.1.2) sul VPS. Fonte: SPEC.md (fb69474) e codice in `src/` (aggiornato 2026-11-07).
+Stato: Fase 1 scritta, testata e in produzione (0.1.3) sul VPS. Fonte: SPEC.md (fb69474) e codice in `src/` (aggiornato 2026-11-08).
 
 - Specifica completa (fonte di verità): [SPEC.md](../../SPEC.md)
 - [stack.md](stack.md)

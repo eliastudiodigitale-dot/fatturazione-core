@@ -3,9 +3,8 @@
 # Questo script trova (e, solo se richiesto, spegne) le imposte automatiche su abbonamenti e Payment Link.
 #   scripts/stripe/tasse-automatiche.sh            -> ELENCA soltanto, non cambia nulla
 #   scripts/stripe/tasse-automatiche.sh spegni     -> chiede conferma e spegne
-# Chiave: una chiave RISTRETTA creata per l'occasione (Abbonamenti: Scrittura, Payment Link: Scrittura), da eliminare dopo,
-# oppure la chiave di ORGANIZZAZIONE (sk_org_live_...): in quel caso si indicano gli account (acct_...) su cui agire,
-# e ogni chiamata porta l'intestazione Stripe-Context con l'account.
+# Elenco: basta la chiave del servizio (organizzazione, sola lettura); ogni chiamata porta Stripe-Context con l'account.
+# Spegnimento: serve una chiave temporanea con scrittura su Abbonamenti e Payment Link (CHIAVE_A_MANO=1), da eliminare dopo.
 # La chiave: per default quella del servizio, letta dal Secret sul VPS (serve la passphrase SSH); con CHIAVE_A_MANO=1 si digita.
 # Non viene mai mostrata e non finisce negli argomenti dei comandi né nella history.
 set -euo pipefail

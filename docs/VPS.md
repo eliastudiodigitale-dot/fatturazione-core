@@ -1,6 +1,7 @@
 # VPS: questo progetto
 
 Stato letto dal server il: 2026-11-07 (scripts/vps/ricognizione.sh, sola lettura, lanciata da Elia)
+NOTA: la sezione "Cosa gira online" non è aggiornata al 2026-11-08 (0.1.3 e Stripe, dichiarati da Elia, non riletti dal server): vale come stato del 2026-11-07. Il Secret API `fatturazione-api-secrets` non è elencato qui.
 
 ## Ricognizione del 2026-11-07
 - Host `ubuntu`, x86_64, k3s v1.34.3. Utente `elia`: kubectl senza sudo sì; sudo chiede la password (import immagini con `ssh -t`).
@@ -14,7 +15,7 @@ Stato letto dal server il: 2026-11-07 (scripts/vps/ricognizione.sh, sola lettura
 Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore della SPEC, commit fb69474). Nessun comando eseguito sul VPS.
 
 ## Cosa gira online
-- App e container: `fatturazione-core` in produzione nel namespace `platform`, versione 0.1.2 (immagine importata in k3s), pod 1/1 Running, readyz pronto (verifica di Elia del 2026-11-07). Migrazioni 003 e 004 applicate, contatori 2026 riallineati (fattura 8, proforma 15). CronJob backup-offsite applicato.
+- App e container: `fatturazione-core` in produzione nel namespace `platform`, versione 0.1.2 al 2026-11-07 (immagine importata in k3s); 0.1.3 rilasciata da Elia il 2026-11-08 (dichiarato) [DA VERIFICARE], pod 1/1 Running, readyz pronto (verifica di Elia del 2026-11-07). Migrazioni 003 e 004 applicate, contatori 2026 riallineati (fattura 8, proforma 15). CronJob backup-offsite applicato.
 - Cluster: k3s, namespace `platform`
 - Postgres: `services-postgres` (Postgres 16.11), Service headless, porta 5432; DB `fatturazione`; ruoli `fatturazione` (owner, solo migrazioni/backup/pulizia) e `fatturazione_app` (servizio)
 - Secret esistente: `fatturazione-secrets` (ns `platform`), chiavi: PG_USER, PG_PASS, PG_DB, APP_PG_USER, APP_PG_PASS
@@ -24,7 +25,7 @@ Fonte di quanto sotto: SPEC.md sez. 2 (verificata il 2026-11-07 dall'autore dell
 - Ricognizione in sola lettura: `ssh vps-se 'bash -s' < scripts/vps/ricognizione.sh 2>&1 | tee ~/ricognizione.txt`
 - Cartella sul server: [DA VERIFICARE]
 - Dominio o URL del servizio: `gestione.gazzolaelia.it` (decisione #19), solo `/webhooks/stripe` e `/webhooks/gocardless` pubblici; certificato Traefik resolver `le`, HTTPS verificato (HTTP 404 a una GET) il 2026-11-07
-- Commit o tag deployato: immagine `fatturazione-core:0.1.2`, compilata dal Mac da commit locali non ancora su origin/main. 0.1.3 pronta, non rilasciata.
+- Commit o tag deployato: immagine `fatturazione-core:0.1.2` al 2026-11-07, compilata dal Mac da commit locali non ancora su origin/main. 0.1.3 rilasciata da Elia il 2026-11-08 (dichiarato) [DA VERIFICARE].
 
 ## Deploy e rollback
 - Deploy: manuale, lo esegue solo Elia con la chiave `claude-deploy` (passphrase = approvazione). Manifest in `k8s/`, passi in docs/deploy.manifest.md, script in `scripts/rilascio/`. Nessun registry: immagine importata in k3s (decisione #23).
