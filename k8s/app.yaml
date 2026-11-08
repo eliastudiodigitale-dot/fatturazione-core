@@ -88,7 +88,7 @@ data:
   PAGAMENTI_TIPO_DOCUMENTO: "fattura"            # decisione #15
   STRIPE_LIVEMODE: "true"                        # gli eventi Stripe di test vengono ignorati
   STRIPE_BUSINESS_PREDEFINITO: ""
-  STRIPE_BUSINESS_PER_ACCOUNT: "acct_1QckZ6D55CvX97Iq=gazzolaelia.it,acct_1UZ3f2RcP2lkt5Lg=serrandasu.it"   # organizzazione Stripe (decisione #37)nizzazione, un account per attività: "acct_...=serrandasu.it,acct_...=heyciar.it,acct_...=gazzolaelia.it" (decisione #37)
+  STRIPE_BUSINESS_PER_ACCOUNT: "acct_1QckZ6D55CvX97Iq=gazzolaelia.it,acct_1UZ3f2RcP2lkt5Lg=serrandasu.it"   # organizzazione Stripe: account -> attività (decisione #37)
   GC_TRIGGER_ACTION: "paid_out"                  # decisione #26
   GC_BUSINESS_PREDEFINITO: "reti.gazzolaelia.it" # unica attività su GoCardless (decisione #27)
   TELEGRAM_CHAT_ID: "21500777"
