@@ -53,7 +53,15 @@ echo "== Abbonamenti con imposte automatiche accese: $(printf '%s' "$SUB" | grep
 printf '%s\n' "$SUB" | jq -r 'select(. != null) | "  \(.id)  stato=\(.status)  cliente=\(.customer)"' 2>/dev/null || true
 echo "== Payment Link con imposte automatiche accese: $(printf '%s' "$PL" | grep -c . || true)"
 printf '%s\n' "$PL" | jq -r 'select(. != null) | "  \(.id)  \(.url)"' 2>/dev/null || true
-echo "Nota: i Checkout creati dal codice dei SaaS hanno l'opzione automatic_tax nel codice: va tolta lì (cerca \"automatic_tax\" nei repo dei SaaS)."
+DAL=$(( $(date +%s) - 30*86400 ))
+CS=$(tutti "/checkout/sessions?created%5Bgte%5D=$DAL" | jq -c 'select(.automatic_tax.enabled == true)') \
+  || { echo "  (Checkout non leggibili con questa chiave: salto)"; CS=""; }
+INV=$(tutti "/invoices?created%5Bgte%5D=$DAL" | jq -c 'select(.automatic_tax.enabled == true)') \
+  || { echo "  (fatture Stripe non leggibili con questa chiave: salto)"; INV=""; }
+echo "== Ultimi 30 giorni, Checkout con imposte automatiche: $(printf '%s' "$CS" | grep -c . || true)  (vengono dal codice dei SaaS: l'opzione automatic_tax va tolta lì)"
+printf '%s\n' "$CS" | jq -r 'select(. != null) | "  \(.id)  \(.created | todate)  \(.success_url // "" | split("?")[0])"' 2>/dev/null | head -10 || true
+echo "== Ultimi 30 giorni, fatture Stripe con imposte automatiche: $(printf '%s' "$INV" | grep -c . || true)"
+printf '%s\n' "$INV" | jq -r 'select(. != null) | "  \(.id)  \(.created | todate)  abbonamento=\(.subscription // .parent.subscription_details.subscription // "-")"' 2>/dev/null | head -10 || true
 
 if [ "$MODO" != "spegni" ]; then continue; fi
 printf '\nSpengo le imposte automatiche su tutto l elenco sopra? (scrivi SI) '; read -r R
