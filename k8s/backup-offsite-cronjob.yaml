@@ -68,7 +68,8 @@ spec:
                   N=$(find /backup -name 'fatturazione-*.dump' -mtime -2 | wc -l)
                   [ "$N" -ge 1 ] || { echo "nessun dump recente da copiare"; exit 1; }
                   rclone copy /backup cifrato: --include 'fatturazione-*.dump' --max-age 48h --immutable --no-traverse -v
-                  rclone check /backup cifrato: --include 'fatturazione-*.dump' --max-age 48h --one-way
+                  # cryptcheck: confronta il contenuto (impronta calcolata sul file cifrato), non solo nomi e dimensioni
+                  rclone cryptcheck /backup cifrato: --include 'fatturazione-*.dump' --max-age 48h --one-way
                   trap - EXIT
                   echo "copia offsite completata: $N dump"
               volumeMounts:
