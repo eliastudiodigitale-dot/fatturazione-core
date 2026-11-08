@@ -2,6 +2,7 @@
 
 Stato letto dal server il: 2026-11-07 (scripts/vps/ricognizione.sh, sola lettura, lanciata da Elia)
 NOTA: la sezione "Cosa gira online" non è aggiornata al 2026-11-08 (0.1.3 e Stripe, dichiarati da Elia, non riletti dal server): vale come stato del 2026-11-07. Il Secret API `fatturazione-api-secrets` non è elencato qui.
+NOTA 2: 0.1.4 in produzione dal 2026-11-08 (dichiarato da Elia, immagine `fatturazione-core:0.1.4`, readyz pronto dopo rollback e `kubectl set image`): non riletto dal server. Dove sotto compare 0.1.2 è lo stato del 2026-11-07.
 
 ## Ricognizione del 2026-11-07
 - Host `ubuntu`, x86_64, k3s v1.34.3. Utente `elia`: kubectl senza sudo sì; sudo chiede la password (import immagini con `ssh -t`).

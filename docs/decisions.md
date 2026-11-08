@@ -3,7 +3,7 @@
 Solo decisioni in vigore. Se una cambia, si sovrascrive qui e la vecchia va in decisions-archivio.md con una riga.
 Formato: #N | data | decisione | motivo | chi (utente o agente)
 
-Fonte: SPEC.md sez. 1 "Decisioni già prese" (#1-#10, commit fb69474; date = data della SPEC) e risposte di Elia nelle sessioni successive (#11-#37).
+Fonte: SPEC.md sez. 1 "Decisioni già prese" (#1-#10, commit fb69474; date = data della SPEC) e risposte di Elia nelle sessioni successive (#11-#42).
 
 #1 | 2026-11-07 | Il numero lo assegna il VPS alla ricezione, con contatore atomico per (anno, tipo). ClickUp non assegna né legge numeri | sequenza ufficiale unica e atomica | utente (SPEC, fb69474)
 #2 | 2026-11-07 | ClickUp è copia/vista; la sequenza ufficiale è nel DB `fatturazione` | evitare dipendenza da ClickUp per la numerazione | utente (SPEC, fb69474)

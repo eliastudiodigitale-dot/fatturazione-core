@@ -13,9 +13,11 @@ Servizio sul VPS che assegna in modo atomico e idempotente i numeri di proforme 
   - `POST /webhooks/stripe`, `POST /webhooks/gocardless` (firma sul body grezzo)
 - Auth: Bearer per fonte (token n8n, dashboard, owner), confronto a tempo costante; rate limit (`RATE_LIMIT_PER_MIN`).
 - Stripe: chiave di organizzazione (`sk_org_`) con un account per attività; le letture usano `Stripe-Context` (decisione #37). Invoice con prodotti di attività diverse = bloccata.
+- Stripe senza invoice (pagamento diretto, 0.1.4): cliente (ragione sociale, indirizzo, P.IVA/CF) dal Customer Stripe, con ripiego sui billing_details del pagamento (`clienteDaPagamento` in `src/stripe.ts`).
 - GoCardless: trigger `paid_out` (#26), una sola attività (#27).
+- Clienti (#42, da progettare): anagrafica unica in ClickUp, lista Clienti; il campo `CLICKUP_CAMPO_CLIENTE_ID` è previsto nel codice ma non configurato.
 - Stati: riservato → creato → inviato_sdi → consegnato; annullato da riservato/creato (SPEC sez. 5).
 - Worker ClickUp: advisory lock Postgres, cerca per campo `chiave` prima di creare (#16); per i documenti da n8n aspetta 45 minuti che il workflow crei la task (#35).
 - Riconciliazione giornaliera (ore 6 Roma, `RICONCILIAZIONE_ORA`); modalità bloccata dopo perdita del DB o numeri storici non riallineati (#30). I doppioni storici restano nel rapporto, senza avviso giornaliero (a2a929a).
 - Notifiche anomalie su Telegram (#21).
-- Fasi: 1 nucleo (fatto, in produzione 0.1.3), 2 SDI (nota di credito inclusa, #24), 3 dashboard e Keycloak (SPEC sez. 10).
+- Fasi: 1 nucleo (fatto, in produzione 0.1.4), 2 SDI (nota di credito inclusa, #24), 3 dashboard e Keycloak (SPEC sez. 10).
