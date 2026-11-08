@@ -26,6 +26,7 @@ if [[ "$KEY" =~ ^sk_org_(live|test)_ ]]; then
 elif ! [[ "$KEY" =~ ^(rk|sk)_(live|test)_ ]]; then
   echo "chiave non valida (attese: rk_live_..., sk_live_... o sk_org_live_...)"; exit 1
 fi
+conta() { [ "$1" = NON-VERIFICATO ] && echo "NON VERIFICATO (manca il permesso di lettura)" || { printf '%s' "$1" | grep -c . || true; }; }
 CTX=""
 api() { # metodo, percorso, [dati...]
   local m="$1" p="$2"; shift 2
@@ -46,26 +47,27 @@ tutti() { # percorso base con parametri -> stampa gli oggetti uno per riga
 for CTX in "${ACCOUNTS[@]}"; do
 [ -n "$CTX" ] && echo && echo "######## account $CTX"
 SUB=$(tutti "/subscriptions?status=all" | jq -c 'select(.automatic_tax.enabled == true and (.status | IN("active","trialing","past_due","unpaid","incomplete")))') \
-  || { echo "  (abbonamenti non leggibili con questa chiave su questo account: salto)"; SUB=""; }
+  || { echo "  (abbonamenti non leggibili con questa chiave su questo account: salto)"; SUB="NON-VERIFICATO"; }
 PL=$(tutti "/payment_links?active=true" | jq -c 'select(.automatic_tax.enabled == true)') \
-  || { echo "  (Payment Link non leggibili con questa chiave su questo account: salto)"; PL=""; }
-echo "== Abbonamenti con imposte automatiche accese: $(printf '%s' "$SUB" | grep -c . || true)"
+  || { echo "  (Payment Link non leggibili con questa chiave su questo account: salto)"; PL="NON-VERIFICATO"; }
+echo "== Abbonamenti con imposte automatiche accese: $(conta "$SUB")"
 printf '%s\n' "$SUB" | jq -r 'select(. != null) | "  \(.id)  stato=\(.status)  cliente=\(.customer)"' 2>/dev/null || true
-echo "== Payment Link con imposte automatiche accese: $(printf '%s' "$PL" | grep -c . || true)"
+echo "== Payment Link con imposte automatiche accese: $(conta "$PL")"
 printf '%s\n' "$PL" | jq -r 'select(. != null) | "  \(.id)  \(.url)"' 2>/dev/null || true
 DAL=$(( $(date +%s) - 30*86400 ))
 CS=$(tutti "/checkout/sessions?created%5Bgte%5D=$DAL" | jq -c 'select(.automatic_tax.enabled == true)') \
-  || { echo "  (Checkout non leggibili con questa chiave: salto)"; CS=""; }
+  || { echo "  (Checkout non leggibili con questa chiave: salto)"; CS="NON-VERIFICATO"; }
 INV=$(tutti "/invoices?created%5Bgte%5D=$DAL" | jq -c 'select(.automatic_tax.enabled == true)') \
-  || { echo "  (fatture Stripe non leggibili con questa chiave: salto)"; INV=""; }
-echo "== Ultimi 30 giorni, Checkout con imposte automatiche: $(printf '%s' "$CS" | grep -c . || true)  (vengono dal codice dei SaaS: l'opzione automatic_tax va tolta lì)"
+  || { echo "  (fatture Stripe non leggibili con questa chiave: salto)"; INV="NON-VERIFICATO"; }
+echo "== Ultimi 30 giorni, Checkout con imposte automatiche: $(conta "$CS")  (vengono dal codice dei SaaS: l'opzione automatic_tax va tolta lì)"
 printf '%s\n' "$CS" | jq -r 'select(. != null) | "  \(.id)  \(.created | todate)  \(.success_url // "" | split("?")[0])"' 2>/dev/null | head -10 || true
-echo "== Ultimi 30 giorni, fatture Stripe con imposte automatiche: $(printf '%s' "$INV" | grep -c . || true)"
+echo "== Ultimi 30 giorni, fatture Stripe con imposte automatiche: $(conta "$INV")"
 printf '%s\n' "$INV" | jq -r 'select(. != null) | "  \(.id)  \(.created | todate)  abbonamento=\(.subscription // .parent.subscription_details.subscription // "-")"' 2>/dev/null | head -10 || true
 
 if [ "$MODO" != "spegni" ]; then continue; fi
 printf '\nSpengo le imposte automatiche su tutto l elenco sopra? (scrivi SI) '; read -r R
 [ "$R" = "SI" ] || { echo "saltato"; continue; }
+[ "$SUB" = NON-VERIFICATO ] && SUB=""; [ "$PL" = NON-VERIFICATO ] && PL=""
 for id in $(printf '%s\n' "$SUB" | jq -r 'select(. != null) | .id'); do
   r=$(api POST "/subscriptions/$id" -d "automatic_tax[enabled]=false"); echo "  $id -> automatic_tax=$(echo "$r" | jq -r '.automatic_tax.enabled // .error.message')"
 done
