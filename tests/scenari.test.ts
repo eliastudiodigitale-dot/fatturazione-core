@@ -626,3 +626,16 @@ describe('Stripe con organizzazione (un account per attività, chiave sk_org_)',
     await app.close();
   });
 });
+
+describe('Doppioni storici fatti a mano', () => {
+  it('stanno nel rapporto ma non generano l\'avviso giornaliero; una collisione con il servizio sì', async () => {
+    const cu = new ClickUpFinto();
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'fattura', anno: ANNO, numero: 3 }]);
+    cu.aggiungiAMano('lista-unica', [{ tipo: 'fattura', anno: ANNO, numero: 3 }]);
+    const deps = { pool, api: cu, cfg: cfgTest({ CLICKUP_LIST_ID_FATTURA: 'lista-unica', CLICKUP_LIST_ID_PROFORMA: 'lista-unica' }).clickup!, log: logMuto, notif: notificheFinte() };
+    const r = await riconcilia({ pool, notif: deps.notif, log: logMuto, riservatoMaxOre: 24, clickup: deps });
+    expect(r.doppiStorici).toHaveLength(1);
+    expect(r.taskDoppie).toEqual([]);
+    expect(deps.notif.lista).toEqual([]);
+  });
+});

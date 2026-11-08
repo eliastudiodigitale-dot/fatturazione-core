@@ -10,6 +10,8 @@ export interface Rapporto {
   buchi: string[];
   divergenzeContatore: string[];
   taskDoppie: string[];
+  /** Doppioni fatti a mano prima del servizio: solo nel rapporto, non avvisano (il servizio non può correggerli). */
+  doppiStorici: string[];
   /** Numeri presenti sia in task fatte a mano sia in task del servizio. */
   collisioni: string[];
   taskOrfane: string[];
@@ -32,7 +34,7 @@ export interface DepsRiconciliazione {
 
 /** Confronto DB <-> ClickUp (e GoCardless). Allinea solo gli stati; mai correzioni dei numeri. */
 export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
-  const R: Rapporto = { buchi: [], divergenzeContatore: [], taskDoppie: [], collisioni: [], taskOrfane: [], rigenerate: [], allineati: [], riservatiVecchi: [], eventiInSospeso: 0, gcRecuperati: [], errori: [] };
+  const R: Rapporto = { buchi: [], divergenzeContatore: [], taskDoppie: [], doppiStorici: [], collisioni: [], taskOrfane: [], rigenerate: [], allineati: [], riservatiVecchi: [], eventiInSospeso: 0, gcRecuperati: [], errori: [] };
   const { pool } = deps;
 
   // 1. Buchi nella sequenza e contatore
@@ -91,7 +93,7 @@ export async function riconcilia(deps: DepsRiconciliazione): Promise<Rapporto> {
       }
       for (const [k, ids] of perChiave) if (ids.length > 1) R.taskDoppie.push(`${k}: ${ids.join(',')}`);
       for (const [k, ids] of aMano) {
-        if (ids.length > 1) R.taskDoppie.push(`${k} (a mano): ${ids.join(',')}`);
+        if (ids.length > 1) R.doppiStorici.push(`${k}: ${ids.join(',')}`);
         // Un numero usato a mano E dal servizio: doppione fiscale. Non si corregge da soli.
         if (perChiave.has(k)) R.collisioni.push(k);
       }
