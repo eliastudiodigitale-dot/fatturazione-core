@@ -51,6 +51,20 @@ export function idFiscaliStripe(ids: Obj[] | null | undefined) {
   return out;
 }
 
+/** Cliente di un pagamento senza invoice: prima i dati del Customer (ragione sociale, indirizzo, tax id), poi quelli del pagamento. */
+export function clienteDaPagamento(ch: Obj, cust?: Obj | null) {
+  const c = cust && !cust.deleted ? cust : undefined;
+  const b = ch.billing_details ?? {};
+  const idCliente = typeof ch.customer === 'string' ? ch.customer : (ch.customer?.id ?? undefined);
+  return {
+    nome: c?.name ?? b.name ?? undefined,
+    email: c?.email ?? b.email ?? undefined,
+    indirizzo: indirizzoStripe(c?.address ?? b.address),
+    ...idFiscaliStripe(c?.tax_ids?.data),
+    stripe_customer: idCliente,
+  };
+}
+
 export function creaStripe(apiKey: string, webhookSecret: string): StripeApi {
   const s = new Stripe(apiKey, { maxNetworkRetries: 2, timeout: 15_000 });
   const opz = (ctx?: string) => (ctx ? { stripeContext: ctx } : {});
@@ -74,8 +88,10 @@ export function creaStripe(apiKey: string, webhookSecret: string): StripeApi {
     },
     async clienteDaCharge(chargeId, ctx) {
       const ch = await s.charges.retrieve(chargeId, {}, opz(ctx));
-      const b = ch.billing_details;
-      return { nome: b.name ?? undefined, email: b.email ?? undefined, indirizzo: indirizzoStripe(b.address as Obj | null), stripe_customer: typeof ch.customer === 'string' ? ch.customer : (ch.customer?.id ?? undefined) };
+      const idCliente = typeof ch.customer === 'string' ? ch.customer : (ch.customer?.id ?? undefined);
+      // Pagamento senza invoice: P.IVA, ragione sociale e indirizzo stanno sul Customer, non sul pagamento.
+      const cust = idCliente ? await s.customers.retrieve(idCliente, { expand: ['tax_ids'] }, opz(ctx)) : undefined;
+      return clienteDaPagamento(ch as unknown as Obj, cust as unknown as Obj | undefined);
     },
   };
 }

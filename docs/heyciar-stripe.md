@@ -110,11 +110,18 @@ Per un abbonamento Squadra con 3 persone il cliente paga 6 €/mese, e quella fa
 
 ## 5. Pacchetti di ore (una tantum)
 
-Il modo consigliato è aggiungere il pacchetto come **voce della prossima invoice dell'abbonamento** (`invoiceItems.create` con il prezzo `ore_*`), oppure fare un'**invoice singola**. In questo modo la fattura del servizio contiene nome, indirizzo e **partita IVA** del cliente.
+Sono un servizio digitale e si fatturano sempre (decisione #41):
 
-Si può usare anche Checkout in modalità `payment`, con due limiti:
-- Va impostato `payment_intent_data.description`, per esempio "heyciar – 5 ore di assistenza telefonica (Hey Squadra)", perché diventa la riga della fattura.
-- Oggi il servizio, per i pagamenti senza invoice, prende i dati del cliente dai dati di fatturazione del pagamento, **senza partita IVA**. Per i clienti B2B usa quindi la voce in invoice finché il servizio non viene aggiornato.
+- **Primo acquisto insieme al canone:** il pacchetto va nella **prima invoice dell'abbonamento**. Con Checkout in modalità `subscription` basta mettere il prezzo `ore_*` tra i `line_items`, accanto ai prezzi mensili: Stripe lo addebita una volta sola, nella prima invoice. Ne nasce una sola fattura con canone e ore.
+- **Acquisti successivi:** sono sempre **a parte**, con Checkout in modalità `payment`:
+  - `line_items: [{ price: prezzo['ore_5_reparti'], quantity: 1 }]`;
+  - `customer`: il Customer già esistente dell'azienda, così la fattura riporta ragione sociale, indirizzo e P.IVA salvati;
+  - `payment_intent_data.description`: per esempio "heyciar – 5 ore di assistenza telefonica (Hey Reparti)". **Diventa la riga della fattura**, quindi va scritta in italiano e in modo chiaro;
+  - **niente `invoice_creation`**, che non serve e su Stripe costa.
+  Ne nasce una fattura separata.
+- Se il cliente non ha ancora un Customer, usare `customer_creation: 'always'`, `billing_address_collection: 'required'` e `tax_id_collection: { enabled: true }`.
+
+Dalla versione 0.1.4 del servizio, per i pagamenti senza invoice ragione sociale, indirizzo e P.IVA vengono presi dal Customer Stripe.
 
 ## 6. Dati del cliente (servono per la fattura)
 
