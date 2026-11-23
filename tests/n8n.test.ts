@@ -56,6 +56,17 @@ const contatto = {
 };
 
 describe('funzioni dei nodi n8n (prepara-busta.js)', () => {
+  it('campo sdi con una PEC o un valore non valido: non rompe la busta', () => {
+    const conSdi = (v: string, pec?: string) => ({ id: 'c', name: 'Cliente', custom_fields: [
+      { id: '1', name: 'Azienda', type: 'short_text', value: 'Geom. Merlo' },
+      { id: '2', name: 'sdi', type: 'short_text', value: v },
+      ...(pec ? [{ id: '3', name: 'pec', type: 'short_text', value: pec }] : []),
+    ] });
+    expect(L.clienteDaContatto(conSdi('MERLORINALDO@PEC.ERRE-DESIGN.COM', 'a@pec.it'), C)).toEqual({ ragione_sociale: 'Geom. Merlo', pec: 'a@pec.it' });
+    expect(L.clienteDaContatto(conSdi('Merlo@Pec.it'), C)).toEqual({ ragione_sociale: 'Geom. Merlo', pec: 'merlo@pec.it' });
+    expect(L.clienteDaContatto(conSdi('xx'), C)).toEqual({ ragione_sociale: 'Geom. Merlo' });
+  });
+
   it('progetto completo: busta accettata dal servizio, stesso numero ai giri successivi', async () => {
     const sel = L.daEmettere(progetto(), C);
     expect(sel).toMatchObject({ ok: true, tipo: 'proforma', importo: 1500.5, business: 'gazzolaelia.it', rata: 'unica', versione: null, segna: { proforma: '5cac5d6d', fattura: '4a56b9d1' } });

@@ -89,7 +89,13 @@ function clienteDaContatto(contatto, C) {
   const cf = v('codice_fiscale');
   if (cf) metti('codice_fiscale', String(cf).replace(/\s/g, '').toUpperCase());
   const sdi = v('codice_destinatario');
-  if (sdi) metti('codice_destinatario', String(sdi).replace(/\s/g, '').toUpperCase());
+  // Il campo "sdi" a volte contiene un indirizzo PEC o un valore non valido: il codice destinatario ha 6-7 caratteri.
+  // Un indirizzo PEC non si perde (diventa pec se manca); un valore non valido si scarta, il servizio avvisa che manca per lo SDI.
+  if (sdi) {
+    const s = String(sdi).replace(/\s/g, '');
+    if (/^[A-Za-z0-9]{6,7}$/.test(s)) metti('codice_destinatario', s.toUpperCase());
+    else if (/^[^@]+@[^@]+\.[^@]+$/.test(s) && !out.pec) out.pec = s.toLowerCase();
+  }
   const ind = { ...scomponiIndirizzo(v('indirizzo_unico')) };
   for (const k of ['via', 'cap', 'citta', 'provincia', 'paese']) {
     const x = v(k);

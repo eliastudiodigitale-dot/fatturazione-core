@@ -23,16 +23,32 @@ const cfArray = [];
 cfArray.push({ id: getCustomFieldId('nr-proforma'), value: nextNrProforma });
 return [{ json: { customFieldsJson: JSON.stringify(cfArray) } }];`;
 
+// Le tre righe di "Build HTML" che decidono numero ed etichetta (copiate dal flusso di Elia)
+const BUILD_HTML_ORIGINALE = `const proformaN = asNumber(
+  clientTask?._nr?.nextNrProforma ?? '',
+  0
+);
+const proformaLabel = proformaN > 0
+  ? \`\${String(proformaN).padStart(2, '0')}/\${year}\`
+  : (trackId ? \`PF-\${trackId}\` : \`PF-\${now.getTime()}\`);
+const invoiceNumber = proformaN > 0 ? proformaLabel : safeStr(billing.invoiceNumber || proformaLabel);`;
+
 const nodo = (name: string, type = 'n8n-nodes-base.code', parameters: Record<string, unknown> = { jsCode: 'return [];' }) => ({ name, type, typeVersion: 2, position: [0, 0], parameters });
 const flussoMinimo = () => ({
   name: 'auto_pro-forma (from clickup) +subtasks',
   id: 'qxTGplETNXsTvKOZ',
   active: true,
   nodes: [
-    nodo('Code in JavaScript'), nodo('Get a task', 'n8n-nodes-base.clickUp', {}), nodo('get proforme', 'n8n-nodes-base.clickUp', {}), nodo('calc-nr'), nodo('Build HTML'),
+    nodo('Code in JavaScript'), nodo('Get a task', 'n8n-nodes-base.clickUp', {}), nodo('get proforme', 'n8n-nodes-base.clickUp', {}), nodo('calc-nr'),
+    nodo('Build HTML', 'n8n-nodes-base.code', { jsCode: BUILD_HTML_ORIGINALE }),
+    nodo('Convert to File', 'n8n-nodes-base.convertToFile', {}), nodo('Gotenberg → PDF', 'n8n-nodes-base.httpRequest', {}),
+    nodo('Code in JavaScript3', 'n8n-nodes-base.code', { jsCode: "const a = $items('calc-nr'); const b = $items('Build HTML'); return [];" }),
+    nodo('Send a document', 'n8n-nodes-base.telegram', { additionalFields: { caption: "=🧾 Proforma {{ $('Build HTML').item.json.invoiceNumber }}" } }),
+    nodo('Send message and wait for response1', 'n8n-nodes-base.telegram', { message: 'Approva con "OK"\ndisapprova con "NO"' }),
+    nodo('Send a text message3', 'n8n-nodes-base.telegram', { text: "=errore per {{ $('Code in JavaScript').first().json.project.name }} per proforma {{ $('Build HTML').first().json.invoiceNumber }}" }),
     nodo('proforma', 'n8n-nodes-base.code', { jsCode: PROFORMA_ORIGINALE }), nodo('Create a task', 'n8n-nodes-base.clickUp', {}), nodo('pf-creata', 'n8n-nodes-base.clickUp', {}),
     nodo('If', 'n8n-nodes-base.if', {}), nodo('If1', 'n8n-nodes-base.if', {}), nodo('Merge', 'n8n-nodes-base.merge', {}),
-    { ...nodo('Send a text message2', 'n8n-nodes-base.telegram', { chatId: '21500777', text: 'x' }), credentials: { telegramApi: { id: 'tg1', name: 'Telegram' } } },
+    { ...nodo('Send a text message2', 'n8n-nodes-base.telegram', { chatId: '21500777', text: "=non inviata {{ $('Build HTML').first().json.invoiceNumber }}" }), credentials: { telegramApi: { id: 'tg1', name: 'Telegram' } } },
     { ...nodo('Set a custom Field on a task', 'n8n-nodes-base.clickUp', { operation: 'setCustomField', value: '={{false}}' }), credentials: { clickUpOAuth2Api: { id: 'cu1', name: 'ClickUp' } } },
     nodo('Send a text message1', 'n8n-nodes-base.telegram', {}), nodo('Get many tasks1', 'n8n-nodes-base.clickUp', {}),
   ],
@@ -41,6 +57,10 @@ const flussoMinimo = () => ({
     'get proforme': { main: [[{ node: 'calc-nr', type: 'main', index: 0 }]] },
     'calc-nr': { main: [[{ node: 'Build HTML', type: 'main', index: 0 }]] },
     'Create a task': { main: [[{ node: 'pf-creata', type: 'main', index: 0 }]] },
+    'Build HTML': { main: [[{ node: 'Convert to File', type: 'main', index: 0 }]] },
+    'Convert to File': { main: [[{ node: 'Gotenberg → PDF', type: 'main', index: 0 }]] },
+    'Gotenberg → PDF': { main: [[{ node: 'Code in JavaScript3', type: 'main', index: 0 }], [{ node: 'Send a text message3', type: 'main', index: 0 }]] },
+    'Code in JavaScript3': { main: [[{ node: 'Send a document', type: 'main', index: 0 }, { node: 'Merge', type: 'main', index: 1 }]] },
     If: { main: [[{ node: 'Merge', type: 'main', index: 0 }], [{ node: 'Send a text message2', type: 'main', index: 0 }]] },
     If1: { main: [[{ node: 'Get many tasks1', type: 'main', index: 0 }], [{ node: 'Send a text message1', type: 'main', index: 0 }]] },
   },
@@ -83,7 +103,18 @@ describe('flusso auto_pro-forma adattato', () => {
     expect(wf.connections['Get a task'].main[0][0].node).toBe('Busta per il servizio');
     expect(wf.connections['Numero ok?'].main.map((u: { node: string }[]) => u.map((x) => x.node))).toEqual([['calc-nr'], ['Errore numero']]);
     expect(wf.connections['Create a task'].main[0].map((x: { node: string }) => x.node)).toEqual(['pf-creata', 'Conferma al servizio']);
-    expect(wf.connections.If.main[1].map((x: { node: string }) => x.node)).toEqual(['Send a text message2', 'Annulla proforma (NO)']);
+    // decisione #44: prima dell'OK solo la bozza, il numero si prende dopo; un NO non consuma nulla e non chiama il servizio
+    const verso = (da: string, i = 0) => wf.connections[da].main[i].map((x: { node: string }) => x.node);
+    expect(verso('Busta per il servizio')).toEqual(['Dati ok?']);
+    expect(verso('Dati ok?')).toEqual(['calc-nr bozza']);
+    expect(verso('Dati ok?', 1)).toEqual(['Errore numero']);
+    expect(verso('Code in JavaScript3 bozza')).toEqual(['Send a document']);
+    expect(verso('If')).toEqual(['Riserva numero (servizio)']);
+    expect(verso('If', 1)).toEqual(['Send a text message2']);
+    expect(verso('Code in JavaScript3')).toEqual(['If1']);
+    expect(wf.nodes.some((n: { name: string }) => n.name === 'Merge' || n.name === 'Annulla proforma (NO)')).toBe(false);
+    // il corpo della richiesta di numero viene dalla busta, non dall'input (che ora è la risposta di Telegram)
+    expect(wf.nodes.find((n: { name: string }) => n.name === 'Riserva numero (servizio)').parameters.jsonBody).toContain("$('Busta per il servizio')");
     expect(wf.connections.If1.main[1].map((x: { node: string }) => x.node)).toEqual(['Send a text message1', 'Annulla proforma (email)']);
     expect(wf.nodes.find((n: { name: string }) => n.name === 'Avvisa errore numero').credentials).toEqual({ telegramApi: { id: 'tg1', name: 'Telegram' } });
     expect(wf.nodes.find((n: { name: string }) => n.name === 'Togli spunta proforma').credentials).toEqual({ clickUpOAuth2Api: { id: 'cu1', name: 'ClickUp' } });
@@ -119,14 +150,36 @@ describe('flusso auto_pro-forma adattato', () => {
     expect(() => esegui(js('calc-nr'), { 'Riserva numero (servizio)': [{ statusCode: 503, body: '' }] })).toThrow(/numero non ricevuto/);
   });
 
-  it('errori: dati sbagliati -> avviso e spunta tolta; servizio giù -> avviso al massimo ogni 30 minuti', () => {
+  it('errori dopo l\'OK: sempre un avviso con il motivo (anche il dettaglio) e il rinvio a inviapf, mai silenzioso', () => {
     const base = { 'Code in JavaScript': [pack], 'Busta per il servizio': [{ errori: [] }] };
-    const [{ json: e1 }] = esegui(js('Errore numero'), base, [{ statusCode: 400, body: { errore: 'cliente: serve nome o ragione_sociale' } }]);
-    expect(e1).toMatchObject({ dati: true });
-    expect(e1.testo).toMatch(/cliente: serve nome/);
+    const [{ json: e1 }] = esegui(js('Errore numero'), base, [{ statusCode: 400, body: { errore: 'richiesta non valida', dettaglio: 'body/cliente/codice_destinatario must match pattern' } }]);
+    expect(e1.testo).toMatch(/richiesta non valida \(body\/cliente\/codice_destinatario/);
+    expect(e1.testo).toMatch(/inviapf/);
     const sd = {};
     expect(esegui(js('Errore numero'), base, [{ statusCode: 503, body: '' }], sd)).toHaveLength(1);
-    expect(esegui(js('Errore numero'), base, [{ statusCode: 503, body: '' }], sd)).toHaveLength(0);
+    expect(esegui(js('Errore numero'), base, [{ statusCode: 503, body: '' }], sd)).toHaveLength(1); // niente più soppressione
+  });
+
+  it('bozza: senza numero né chiamate al servizio; la versione definitiva non cambia', () => {
+    const [{ json: cn }] = esegui(js('calc-nr bozza'), { 'Get a task': [contatto] });
+    expect(cn._nr).toMatchObject({ nextNrProforma: 0, proformaLabel: 'BOZZA', bozza: true, chiave: null });
+    expect(cn.name).toBe('Luca Bianchi');
+    const bh = js('Build HTML bozza');
+    expect(bh).toContain("const invoiceNumber = 'BOZZA';");
+    expect(bh).toContain(": 'BOZZA';");
+    expect(js('Build HTML')).toContain('proformaN > 0 ? proformaLabel');
+    expect(js('Code in JavaScript3 bozza')).toContain("$items('calc-nr bozza')");
+    expect(js('Code in JavaScript3')).toContain("$items('calc-nr')");
+    const caption = wf.nodes.find((n: { name: string }) => n.name === 'Send a document').parameters.additionalFields.caption as string;
+    expect(caption).toContain("$('Build HTML bozza')");
+    expect(wf.nodes.find((n: { name: string }) => n.name === 'Send a text message2').parameters.text).toContain("$('Build HTML bozza')");
+    expect(wf.nodes.find((n: { name: string }) => n.name === 'Send message and wait for response1').parameters.message).toMatch(/BOZZA senza numero/);
+  });
+
+  it('email del cliente mancante: errore locale prima della bozza, nessun numero', () => {
+    const senzaEmail = { ...contatto, custom_fields: contatto.custom_fields.filter((c) => c.name !== 'email lavoro') };
+    const [{ json: b }] = esegui(js('Busta per il servizio'), { 'Code in JavaScript': [pack], 'Get a task': [senzaEmail] });
+    expect(b.errori).toEqual([expect.stringMatching(/email del cliente mancante/)]);
   });
 
   it('totale zero o Business sconosciuto: errore locale, il servizio rifiuta senza consumare numeri', async () => {
