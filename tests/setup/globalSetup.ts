@@ -41,4 +41,6 @@ export default function setup() {
   psql('fatturazione', 'fatturazione', mig('003_lettura_contatori.sql'));
   // 004 corregge l'ordine numero/data; con SOLO_001_002=1 si verifica il comportamento attuale del VPS.
   if (process.env.SOLO_001_002 !== '1') psql('fatturazione', 'fatturazione', mig('004_data_riserva_ordinata.sql'));
+  // 005: CRM e ticketing (cache ClickUp + ticket dalle fonti).
+  psql('fatturazione', 'fatturazione', mig('005_crm_ticket.sql'));
 }

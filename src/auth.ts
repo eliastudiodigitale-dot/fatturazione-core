@@ -22,3 +22,20 @@ export function creaVerificaToken(tokens: Config['tokens']) {
 export function hmacUguale(a: Buffer, b: Buffer): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+export interface FonteAutenticata {
+  fonte: string;
+  business: string;
+}
+
+/** Token delle fonti ticket (uno per fonte, legato a un'attività): stesso confronto a tempo costante dei token principali. */
+export function creaVerificaFonte(fonti: Config['ticket']['fonti']) {
+  const attesi = Object.entries(fonti).map(([fonte, v]) => ({ fonte, business: v.business, d: digest(v.token) }));
+  return (header: string | undefined): FonteAutenticata | undefined => {
+    if (!header || !header.startsWith('Bearer ')) return undefined;
+    const d = digest(header.slice(7).trim());
+    let trovato: FonteAutenticata | undefined;
+    for (const a of attesi) if (timingSafeEqual(d, a.d)) trovato = { fonte: a.fonte, business: a.business };
+    return trovato;
+  };
+}

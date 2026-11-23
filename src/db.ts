@@ -42,3 +42,5 @@ export async function inTransazione<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => 
 /** Chiavi degli advisory lock (una sola istanza di worker/riconciliazione alla volta). */
 export const LOCK_CLICKUP = 7_302_026_001;
 export const LOCK_EVENTI = 7_302_026; // usato con la forma a due argomenti (classe, id evento)
+/** Una sola sincronizzazione CRM/ticket alla volta. */
+export const LOCK_CRM = 7_302_026_002;

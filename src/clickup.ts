@@ -19,6 +19,24 @@ export interface NuovaTask {
   nome: string;
   descrizione: string;
   campi: { id: string; value: ValoreCampo; value_options?: { time: boolean } }[];
+  /** Priorità ClickUp: 1 urgente, 2 alta, 3 normale, 4 bassa. */
+  priorita?: number;
+  tag?: string[];
+}
+
+/** Task di una lista CRM (clienti o ticket) già normalizzata: i campi custom sono testo, per ID campo. */
+export interface TaskCrm {
+  id: string;
+  nome: string;
+  stato: { nome: string; tipo: string };
+  /** 1 urgente, 2 alta, 3 normale, 4 bassa. */
+  priorita: number | null;
+  creata: Date | null;
+  modificata: Date | null;
+  chiusa: Date | null;
+  assegnati: string[];
+  tag: string[];
+  campi: Record<string, string | string[] | null>;
 }
 
 export interface CampoLista {
@@ -36,6 +54,14 @@ export interface ClickUpApi {
   elencaTask(listId: string): Promise<TaskInfo[]>;
   /** Campi della lista con le opzioni dei menu a tendina (per scrivere AREA e metodo di pagamento per nome). */
   campiLista(listId: string): Promise<CampoLista[]>;
+  /** Task di una lista CRM, anche chiuse e archiviate. Con `modificateDopo` solo quelle cambiate da quella data. */
+  elencaTaskCrm(listId: string, o?: { modificateDopo?: Date }): Promise<TaskCrm[]>;
+  /** Commento sulla task (i messaggi dei clienti arrivati dalle fonti). */
+  commenta(taskId: string, testo: string): Promise<void>;
+  /** Cambia nome e/o stato (per nome) di una task: la scheda cliente modificata dal portale. */
+  aggiornaTask(taskId: string, mod: { nome?: string; stato?: string }): Promise<void>;
+  /** Imposta un campo custom della task; `null` lo svuota. */
+  impostaCampo(taskId: string, campoId: string, valore: ValoreCampo | ValoreCampo[] | null): Promise<void>;
 }
 
 export class ErroreClickUp extends Error {
@@ -102,6 +128,69 @@ export function infoTask(t: RawTask, campi: CampiClickUp): TaskInfo {
     }
   }
   return { id: t.id, chiave, numeri };
+}
+
+type RawOpzione = { id: string; name?: string; label?: string; orderindex?: number };
+type RawCampoCompleto = { id: string; type?: string; value?: unknown; type_config?: { options?: RawOpzione[] } };
+type RawTaskCrm = {
+  id: string;
+  name?: string;
+  status?: { status?: string; type?: string };
+  priority?: { id?: string | number } | null;
+  date_created?: string | null;
+  date_updated?: string | null;
+  date_closed?: string | null;
+  assignees?: { username?: string; email?: string }[];
+  tags?: { name?: string }[];
+  custom_fields?: RawCampoCompleto[];
+};
+
+const dataMs = (v: unknown): Date | null => {
+  const n = typeof v === 'string' || typeof v === 'number' ? Number(v) : NaN;
+  return Number.isFinite(n) && n > 0 ? new Date(n) : null;
+};
+
+/** Valore di un campo custom come testo: i menu a tendina e le etichette diventano i nomi delle opzioni. */
+export function valoreCampo(c: RawCampoCompleto): string | string[] | null {
+  const v = c.value;
+  if (v === undefined || v === null || v === '') return null;
+  const opzioni = c.type_config?.options ?? [];
+  const nome = (o: RawOpzione) => o.name ?? o.label ?? o.id;
+  switch (c.type) {
+    case 'drop_down': {
+      const o = opzioni.find((x) => x.orderindex === Number(v) || x.id === v);
+      return o ? nome(o) : null;
+    }
+    case 'labels':
+      return Array.isArray(v) ? v.map((id) => opzioni.find((x) => x.id === id)).filter((o): o is RawOpzione => Boolean(o)).map(nome) : null;
+    case 'list_relationship':
+    case 'tasks':
+      return Array.isArray(v) ? v.map((x) => String((x as { id?: unknown }).id ?? '')).filter(Boolean) : null;
+    case 'users':
+      return Array.isArray(v) ? v.map((x) => String((x as { username?: unknown }).username ?? '')).filter(Boolean) : null;
+    default:
+      if (typeof v === 'string') return v.trim() === '' ? null : v.trim();
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      return null;
+  }
+}
+
+export function taskCrm(t: RawTaskCrm): TaskCrm {
+  const campi: TaskCrm['campi'] = {};
+  for (const c of t.custom_fields ?? []) campi[c.id] = valoreCampo(c);
+  const p = Number(t.priority?.id);
+  return {
+    id: t.id,
+    nome: t.name ?? '',
+    stato: { nome: t.status?.status ?? '', tipo: t.status?.type ?? '' },
+    priorita: p >= 1 && p <= 4 ? p : null,
+    creata: dataMs(t.date_created),
+    modificata: dataMs(t.date_updated),
+    chiusa: dataMs(t.date_closed),
+    assegnati: (t.assignees ?? []).map((a) => a.username || a.email || '').filter(Boolean),
+    tag: (t.tags ?? []).map((x) => x.name ?? '').filter(Boolean),
+    campi,
+  };
 }
 
 const attendi = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -176,8 +265,26 @@ export function creaClickUp(o: { token: string; apiUrl: string; rpm: number; cam
         name: t.nome,
         markdown_description: t.descrizione,
         custom_fields: t.campi,
+        ...(t.priorita ? { priority: t.priorita } : {}),
+        ...(t.tag?.length ? { tags: t.tag } : {}),
       })) as { id: string };
       return r.id;
+    },
+    async elencaTaskCrm(listId, opz = {}) {
+      const dopo = opz.modificateDopo ? `&date_updated_gt=${opz.modificateDopo.getTime()}` : '';
+      return ((await pagine(listId, dopo)) as RawTaskCrm[]).map(taskCrm);
+    },
+    async commenta(taskId, testo) {
+      await richiesta('POST', `/task/${encodeURIComponent(taskId)}/comment`, { comment_text: testo, notify_all: false });
+    },
+    async aggiornaTask(taskId, mod) {
+      await richiesta('PUT', `/task/${encodeURIComponent(taskId)}`, { ...(mod.nome !== undefined ? { name: mod.nome } : {}), ...(mod.stato !== undefined ? { status: mod.stato } : {}) });
+    },
+    async impostaCampo(taskId, campoId, valore) {
+      const percorso = `/task/${encodeURIComponent(taskId)}/field/${encodeURIComponent(campoId)}`;
+      if (valore === null) await richiesta('DELETE', percorso);
+      // Le etichette (labels) si impostano con l'elenco degli ID; il menu a tendina con l'ID dell'opzione: il valore arriva già nella forma giusta.
+      else await richiesta('POST', percorso, { value: valore });
     },
     async collegaProgetto(taskId, campo, progetto) {
       await richiesta('POST', `/task/${encodeURIComponent(taskId)}/field/${encodeURIComponent(campo)}`, { value: { add: [progetto], rem: [] } });

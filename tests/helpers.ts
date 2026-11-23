@@ -1,12 +1,13 @@
 import { Writable } from 'node:stream';
 import pg from 'pg';
-import { caricaConfig, type Config } from '../src/config.js';
+import { caricaConfig, type Config, type CrmConfig } from '../src/config.js';
+import { ErroreBackend, type BackendTicket, type MessaggioRemoto, type ModificaRemota, type TicketRemoto } from '../src/ticket-backend.js';
 import { creaPool } from '../src/db.js';
 import { Blocco } from '../src/blocco.js';
 import { creaApp, opzioniLogger } from '../src/app.js';
 import { creaEventi, type Elaboratore } from '../src/eventi.js';
 import type { Notificatore } from '../src/notifiche.js';
-import { ErroreClickUp, leggiChiave, type CampoLista, type ClickUpApi, type NuovaTask, type TaskInfo } from '../src/clickup.js';
+import { ErroreClickUp, leggiChiave, type CampoLista, type ClickUpApi, type NuovaTask, type TaskCrm, type TaskInfo } from '../src/clickup.js';
 import type { StripeApi } from '../src/stripe.js';
 import { ENV_TEST, PORTA } from './setup/env.js';
 
@@ -15,7 +16,9 @@ export const cfgTest = (extra: Record<string, string> = {}): Config => caricaCon
 export const admin = new pg.Pool({ host: '127.0.0.1', port: PORTA, user: 'postgres', password: 'test', database: 'fatturazione', max: 2 });
 
 export async function svuota() {
-  await admin.query('TRUNCATE storico, documenti, eventi_ricevuti, contatori RESTART IDENTITY CASCADE');
+  await admin.query(
+    'TRUNCATE storico, documenti, eventi_ricevuti, contatori, ticket_messaggi, ticket_eventi, ticket, crm_clienti, crm_sync, crm_contatti, crm_note, crm_attivita, crm_opportunita, crm_viste, utenti_dashboard RESTART IDENTITY CASCADE',
+  );
 }
 
 export function poolApp() {
@@ -41,15 +44,30 @@ export function logCatturato() {
 const logMuto = { info() {}, warn() {}, error() {}, debug() {}, fatal() {}, trace() {}, child() { return logMuto; }, level: 'silent', silent() {} } as never;
 export { logMuto };
 
-export async function costruisci(o: { cfg?: Config; pool: pg.Pool; elaboratori?: Record<string, Elaboratore>; stripe?: StripeApi; sbloccato?: boolean; logger?: unknown }) {
+export async function costruisci(o: {
+  cfg?: Config;
+  pool: pg.Pool;
+  elaboratori?: Record<string, Elaboratore>;
+  stripe?: StripeApi;
+  sbloccato?: boolean;
+  logger?: unknown;
+  dashboard?: { fetchFn?: typeof fetch; ora?: () => number };
+  operativo?: { backends?: Record<string, BackendTicket>; crm?: { api?: ClickUpApi; cfg?: CrmConfig } };
+}) {
   const cfg = o.cfg ?? cfgTest();
   const blocco = new Blocco(cfg.forzaBlocco);
   if (o.sbloccato !== false) blocco.esito([]);
   const notif = notificheFinte();
   const eventi = creaEventi(o.pool, logMuto, notif, o.elaboratori ?? {}, () => blocco.bloccato);
-  const app = await creaApp({ cfg, pool: o.pool, blocco, eventi, stripe: o.stripe, logger: (o.logger as never) ?? false });
+  const app = await creaApp({ cfg, pool: o.pool, blocco, eventi, stripe: o.stripe, logger: (o.logger as never) ?? false, notif, dashboard: o.dashboard, operativo: o.operativo });
   return { app, blocco, eventi, notif, cfg };
 }
+
+export const AUTH_FONTE = {
+  heyciar: { authorization: `Bearer ${ENV_TEST.TICKET_TOKEN_HEYCIAR}` },
+  serrandasu: { authorization: `Bearer ${ENV_TEST.TICKET_TOKEN_SERRANDASU}` },
+  reti: { authorization: `Bearer ${ENV_TEST.TICKET_TOKEN_RETI}` },
+};
 
 export const AUTH = {
   n8n: { authorization: `Bearer ${ENV_TEST.N8N_TOKEN}` },
@@ -117,6 +135,54 @@ export class ClickUpFinto implements ClickUpApi {
     this.check();
     return this.opzioni;
   }
+  /** Task CRM scritte a mano dal test (clienti, ticket aperti da un operatore in ClickUp). */
+  crm = new Map<string, TaskCrm[]>();
+  /** Modifiche "fatte in ClickUp" su task create dal servizio (stato, assegnati, priorità...). */
+  modifiche = new Map<string, Partial<TaskCrm>>();
+  commenti: { taskId: string; testo: string }[] = [];
+  ultimoFiltroData: Date | undefined;
+  aggiungiCrm(listId: string, t: Partial<TaskCrm> & { id: string; nome: string }): TaskCrm {
+    const completa: TaskCrm = { stato: { nome: 'to do', tipo: 'open' }, priorita: null, creata: new Date(), modificata: new Date(), chiusa: null, assegnati: [], tag: [], campi: {}, ...t };
+    this.crm.set(listId, [...(this.crm.get(listId) ?? []), completa]);
+    return completa;
+  }
+  async elencaTaskCrm(listId: string, o: { modificateDopo?: Date } = {}): Promise<TaskCrm[]> {
+    this.check();
+    this.ultimoFiltroData = o.modificateDopo;
+    // Le task create dal servizio in quella lista tornano come task CRM (come farebbe ClickUp).
+    const create = [...this.task]
+      .filter(([, v]) => v.lista === listId && v.t)
+      .map(([id, v]): TaskCrm => ({
+        id,
+        nome: v.t!.nome,
+        stato: { nome: 'to do', tipo: 'open' },
+        priorita: v.t!.priorita ?? null,
+        creata: new Date(),
+        modificata: new Date(),
+        chiusa: null,
+        assegnati: [],
+        tag: [],
+        campi: Object.fromEntries(v.t!.campi.map((c) => [c.id, Array.isArray(c.value) ? (c.value as unknown[]).map(String) : String(c.value)])),
+        ...this.modifiche.get(id),
+      }));
+    const tutte = [...(this.crm.get(listId) ?? []), ...create];
+    return tutte.filter((t) => !o.modificateDopo || (t.modificata ?? new Date(0)) > o.modificateDopo);
+  }
+  async commenta(taskId: string, testo: string): Promise<void> {
+    this.check();
+    this.commenti.push({ taskId, testo });
+  }
+  /** Scritture fatte dal portale sulle schede cliente. */
+  aggiornamenti: { taskId: string; mod: { nome?: string; stato?: string } }[] = [];
+  campiImpostati: { taskId: string; campoId: string; valore: unknown }[] = [];
+  async aggiornaTask(taskId: string, mod: { nome?: string; stato?: string }): Promise<void> {
+    this.check();
+    this.aggiornamenti.push({ taskId, mod });
+  }
+  async impostaCampo(taskId: string, campoId: string, valore: unknown): Promise<void> {
+    this.check();
+    this.campiImpostati.push({ taskId, campoId, valore });
+  }
   async elencaTask(listId: string): Promise<TaskInfo[]> {
     this.check();
     return [...this.task]
@@ -135,4 +201,42 @@ export async function aspetta(cond: () => Promise<boolean>, ms = 5000) {
     await new Promise((r) => setTimeout(r, 50));
   }
   throw new Error('condizione non raggiunta');
+}
+
+/** Backend ticket di un business, finto: tiene i ticket in memoria e registra le chiamate ricevute dal portale. */
+export class BackendFinto implements BackendTicket {
+  ticket: TicketRemoto[] = [];
+  msg = new Map<string, MessaggioRemoto[]>();
+  chiamate: { op: string; id?: string; dati?: unknown }[] = [];
+  giu = false;
+  ultimoDopo: Date | undefined;
+  private seq = 0;
+  private errore(): never {
+    // Stessa classe usata dal client reale, importata qui per non dipendere dall'ordine dei moduli.
+    throw new ErroreBackend(0, 'backend ticket non raggiungibile (finto)');
+  }
+  async elenca(dopo?: Date) {
+    if (this.giu) this.errore();
+    this.ultimoDopo = dopo;
+    this.chiamate.push({ op: 'elenca' });
+    return this.ticket;
+  }
+  async messaggi(id: string) {
+    if (this.giu) this.errore();
+    return this.msg.get(id) ?? [];
+  }
+  async rispondi(id: string, m: { testo: string; autore: string; interno: boolean }) {
+    if (this.giu) this.errore();
+    this.chiamate.push({ op: 'rispondi', id, dati: m });
+  }
+  async aggiorna(id: string, mod: ModificaRemota) {
+    if (this.giu) this.errore();
+    this.chiamate.push({ op: 'aggiorna', id, dati: mod });
+  }
+  async crea(n: unknown) {
+    if (this.giu) this.errore();
+    const id = `r${++this.seq}`;
+    this.chiamate.push({ op: 'crea', id, dati: n });
+    return { id };
+  }
 }
