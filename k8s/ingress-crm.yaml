@@ -1,0 +1,34 @@
+# Esposizione pubblica OPZIONALE di dashboard e ticket (decisione #45). NON applicata. Si applica solo dopo aver letto docs/crm-ticket.md.
+# Stesso host e stesso certificato di ingress.yaml (decisione #19). Solo HTTPS.
+#  - /dashboard: pagina e API della dashboard, protette dal login Keycloak (cookie di sessione).
+#  - /v1/ticket: ricezione dei ticket dalle fonti ESTERNE al cluster, protetta da un token per fonte e da un limite di richieste.
+#    Se una fonte gira dentro il cluster (es. il backend heyciar nel namespace hr-accessi) può usare il Service interno
+#    http://fatturazione-core.platform:8080 e non serve esporla: in quel caso togliere il percorso /v1/ticket da qui
+#    e aggiungere alla NetworkPolicy l'ingresso da quel namespace.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fatturazione-core-crm
+  namespace: platform
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: le
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: gestione.gazzolaelia.it
+      http:
+        paths:
+          - path: /dashboard
+            pathType: Prefix
+            backend:
+              service:
+                name: fatturazione-core
+                port: {name: http}
+          - path: /v1/ticket
+            pathType: Prefix
+            backend:
+              service:
+                name: fatturazione-core
+                port: {name: http}

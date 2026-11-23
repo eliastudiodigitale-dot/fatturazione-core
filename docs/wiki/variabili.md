@@ -18,6 +18,13 @@ Telegram: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (senza entrambe le notifiche rest
 
 ClickUp: CLICKUP_TOKEN, CLICKUP_API_URL, CLICKUP_RPM, CLICKUP_LIST_ID_FATTURA, CLICKUP_LIST_ID_PROFORMA, CLICKUP_CAMPO_CHIAVE_ID (obbligatorio se ClickUp è attivo), e gli altri `CLICKUP_CAMPO_*_ID` per anno, numeri, flag, totali, date, email, ragione, progetto, cliente, pagata, metodo, area, rata. ClickUp configurato a metà = errore di avvio.
 
+CRM, ticket e dashboard (#45, dettagli in docs/crm-ticket.md): 
+- fonti ticket: TICKET_FONTI (`fonte:attività`), un TICKET_TOKEN_<FONTE> per ognuna (min 32 caratteri, tutti diversi), TICKET_SLA_ORE, TICKET_SLA_PRIMA_RISPOSTA_ORE, TICKET_SLA_RISOLUZIONE_ORE
+- backend ticket dei business (#46): TICKET_BACKEND_URL_<FONTE> (https, o http dentro il cluster) e TICKET_BACKEND_TOKEN_<FONTE> (token in uscita, min 32 caratteri); TICKET_SYNC_MIN (default 5)
+- SLA a piani (#46): TICKET_SLA_PIANI (`piano=ore_prima_risposta/ore_risoluzione`, default 48h, 3g, 5g, 7g), TICKET_PIANO_PREDEFINITO (`attività=piano`, `nessuno` = senza SLA)
+- ClickUp CRM: CLICKUP_LIST_ID_CLIENTI, CLICKUP_LIST_ID_TICKET (almeno una per attivare la sync), CLICKUP_CLIENTI_CAMPO_{EMAIL,PIVA,CF,TELEFONO,BUSINESS}_ID, CLICKUP_TICKET_CAMPO_{REF,BUSINESS,FONTE,CATEGORIA,CLIENTE,EMAIL}_ID (REF obbligatorio con la lista ticket), CRM_BUSINESS_ALIAS, CRM_BUSINESS_PREDEFINITO, CRM_SYNC_CLIENTI_MIN, CRM_SYNC_TICKET_MIN, CRM_CREA_CLIENTI
+- dashboard (tutte o nessuna): KEYCLOAK_ISSUER, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, DASHBOARD_SESSION_SECRET (min 32 caratteri), DASHBOARD_URL_BASE, KEYCLOAK_CLAIM_BUSINESS (default `business`)
+
 Secret in k8s: `fatturazione-secrets` (ns `platform`) con PG_USER, PG_PASS, PG_DB (owner, solo migrazioni/backup/pulizia) e APP_PG_USER, APP_PG_PASS (servizio). Secret API da creare con `scripts/vps/crea-secret.sh`.
 
 Incoerenza da sistemare [DA VERIFICARE]: `.env.example` non include 20 nomi letti da `src/config.ts` (tra cui STRIPE_BUSINESS_PER_ACCOUNT, WORKER_ATTESA_CLICKUP_MIN, AVVIO_SENZA_CLICKUP) e contiene CLICKUP_CAMPO_BUSINESS_ID e CLICKUP_CAMPO_NUMERO_ID, che nessun file legge.

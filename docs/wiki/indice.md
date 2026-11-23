@@ -8,6 +8,7 @@ Stato: Fase 1 scritta, testata e in produzione (0.1.4) sul VPS. Fonte: SPEC.md (
 - [comandi.md](comandi.md)
 - [deploy.md](deploy.md)
 - [variabili.md](variabili.md)
+- Portale operativo, ticket, CRM, fatturazione (#42, #45-#47): [../crm-ticket.md](../crm-ticket.md) e contratto dei backend ticket [../ticket-backend-api.md](../ticket-backend-api.md)
 - Stato: [../STATO.md](../STATO.md) · Decisioni: [../decisions.md](../decisions.md) · Idee: [../idee.md](../idee.md) · VPS: [../VPS.md](../VPS.md)
 
 Nessun'altra wiki presente nel repo.
