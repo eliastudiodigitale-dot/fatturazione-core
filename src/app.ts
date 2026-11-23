@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import type pg from 'pg';
 import type { Config, Tipo } from './config.js';
-import { creaVerificaToken, type Chiamante } from './auth.js';
+import { creaVerificaFonte, creaVerificaToken, type Chiamante } from './auth.js';
 import { creaRateLimit } from './ratelimit.js';
 import type { Blocco } from './blocco.js';
 import { avvisiBusta, canonico, controllaBusta, payloadDaBusta, schemaBusta, type Busta } from './busta.js';
@@ -10,6 +10,12 @@ import type { Stato } from './stati.js';
 import type { Eventi } from './eventi.js';
 import type { StripeApi } from './stripe.js';
 import { firmaGcValida } from './gocardless.js';
+import type { Notificatore } from './notifiche.js';
+import { AMBITO_TOTALE, ErroreKpi, ErroreRichiesta, registraLetture, registraScritture, type ParteSync } from './api-crm.js';
+import { ErroreTicket } from './ticket.js';
+import { ErroreCrm, type DepsCrmOps } from './crm-ops.js';
+import type { BackendTicket } from './ticket-backend.js';
+import { registraDashboard, type DepsDashboard } from './dashboard.js';
 
 export interface DepsApp {
   cfg: Config;
@@ -18,6 +24,13 @@ export interface DepsApp {
   eventi: Eventi;
   stripe?: StripeApi;
   logger?: FastifyServerOptions['logger'];
+  notif?: Notificatore;
+  /** Sincronizzazione CRM/ticket con ClickUp avviabile a mano dal token owner (solo se configurata). */
+  sincronizza?: (parte: ParteSync, completa: boolean) => Promise<Record<string, unknown> | 'occupato'>;
+  /** Prove: sostituisce fetch e orologio del login Keycloak. */
+  dashboard?: Pick<DepsDashboard, 'fetchFn' | 'ora'>;
+  /** Backend ticket dei business (uno per fonte) e ClickUp per le schede cliente: ciò che rende il portale operativo (#46). */
+  operativo?: { backends?: Record<string, BackendTicket>; crm?: Omit<DepsCrmOps, 'pool'> };
 }
 
 declare module 'fastify' {
@@ -55,7 +68,9 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
   });
 
   app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown; code?: string }, req, reply) => {
-    if (err instanceof ErroreStato) return reply.code(err.codice).send({ errore: err.message });
+    if (err instanceof ErroreStato || err instanceof ErroreTicket) return reply.code(err.codice).send({ errore: err.message });
+    if (err instanceof ErroreCrm) return reply.code(err.codice).send({ errore: err.message, ...err.extra });
+    if (err instanceof ErroreRichiesta || err instanceof ErroreKpi) return reply.code(400).send({ errore: err.message });
     if (err.validation) return reply.code(400).send({ errore: 'richiesta non valida', dettaglio: err.message });
     const sc = err.statusCode ?? 500;
     if (sc === 413) return reply.code(413).send({ errore: 'body troppo grande' });
@@ -75,6 +90,19 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
     req.chiamante = chi;
   };
   const tutti: Chiamante[] = ['n8n', 'dashboard', 'owner'];
+
+  // Scritture dei ticket: token n8n/owner oppure il token di una fonte (heyciar, serrandasu, reti...), che fissa fonte e attività.
+  const verificaFonte = creaVerificaFonte(cfg.ticket.fonti);
+  const autenticaScrittura = async (req: FastifyRequest, reply: FastifyReply) => {
+    const intestazione = req.headers.authorization;
+    const chi = verifica(intestazione);
+    const fonte = chi ? undefined : verificaFonte(intestazione);
+    if (!chi && !fonte) return reply.code(401).send({ errore: 'non autorizzato' });
+    if (!limite(chi ?? `fonte:${fonte!.fonte}`)) return reply.code(429).send({ errore: 'troppe richieste' });
+    if (chi === 'dashboard') return reply.code(403).send({ errore: 'non consentito' });
+    req.chiamante = chi;
+    req.fonteTicket = fonte;
+  };
 
   // --- salute
   app.get('/healthz', async () => ({ ok: true }));
@@ -220,6 +248,22 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
       return vistaLeggera(d);
     },
   );
+
+  // --- CRM e ticket (decisione #45): letture per i token, scritture per le fonti
+  const notif: Notificatore = deps.notif ?? { anomalia() {} };
+  registraLetture(app, { pool }, '/v1', [autentica(tutti)], () => AMBITO_TOTALE);
+  registraScritture(app, { pool, cfg, notif, sincronizza: deps.sincronizza }, autenticaScrittura, autentica);
+  if (cfg.dashboard)
+    await registraDashboard(app, {
+      pool,
+      cfg: cfg.dashboard,
+      appCfg: cfg,
+      notif,
+      backends: deps.operativo?.backends ?? {},
+      crm: { pool, ...deps.operativo?.crm },
+      sincronizza: deps.sincronizza,
+      ...deps.dashboard,
+    });
 
   // --- webhook: body grezzo, firma verificata prima di tutto il resto
   await app.register(async (wh) => {

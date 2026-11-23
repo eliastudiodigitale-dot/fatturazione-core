@@ -9,6 +9,9 @@ import { creaGc, elaboratoreGc } from './gocardless.js';
 import { creaClickUp } from './clickup.js';
 import { FONTI_ESTERNE, FONTI_INTERNE, giroWorker, type DepsWorker } from './worker.js';
 import { riconcilia } from './riconciliazione.js';
+import { giroCrm, type DepsCrm, type Parte } from './sync.js';
+import { creaBackendHttp, type BackendTicket } from './ticket-backend.js';
+import { giroTicketRemoti, type DepsOps } from './ticket-ops.js';
 
 const cfg = caricaConfig();
 const pool = creaPool(cfg.pg);
@@ -28,10 +31,41 @@ if (stripe && cfg.pagamentiTipo) elaboratori.stripe = elaboratoreStripe({ pool, 
 if (gc && cfg.gocardless && cfg.pagamentiTipo) elaboratori.gocardless = elaboratoreGc({ pool, api: gc, tipo: cfg.pagamentiTipo, trigger: cfg.gocardless.trigger, notif, businessPredefinito: cfg.gocardless.businessPredefinito });
 const eventi = creaEventi(pool, boot, notif, elaboratori, () => blocco.bloccato);
 
-const app = await creaApp({ cfg, pool, blocco, eventi, stripe });
+// CRM e ticket (#45): la sincronizzazione con ClickUp parte solo se ClickUp e almeno una lista sono configurati.
+let depsCrm: DepsCrm | undefined;
+// Backend ticket dei business (#46): i ticket vivono lì e il portale li richiama via API.
+const backends: Record<string, BackendTicket> = {};
+for (const [fonte, f] of Object.entries(cfg.ticket.fonti)) if (f.backend) backends[fonte] = creaBackendHttp(f.backend);
+const depsOps: DepsOps = { pool, cfg, backends, notif };
+const haBackend = Object.keys(backends).length > 0;
+
+async function sincronizza(parte: 'clienti' | 'ticket' | 'tutto', completa: boolean) {
+  const out: Record<string, unknown> = {};
+  for (const x of (parte === 'tutto' ? ['clienti', 'ticket'] : [parte]) as Parte[]) {
+    if (depsCrm) {
+      const r = await giroCrm(depsCrm, x, { completa });
+      if (r === 'occupato') return 'occupato' as const;
+      Object.assign(out, r);
+    }
+    if (x === 'ticket' && haBackend) {
+      const r = await giroTicketRemoti(depsOps, { completa });
+      if (r === 'occupato') return 'occupato' as const;
+      out.backend = r;
+    }
+  }
+  return out;
+}
+
+const app = await creaApp({
+  cfg, pool, blocco, eventi, stripe, notif,
+  sincronizza: cfg.crm || haBackend ? sincronizza : undefined,
+  operativo: { backends, crm: clickup && cfg.crm ? { api: clickup, cfg: cfg.crm } : undefined },
+});
 app.log.info({ config: riassuntoConfig(cfg) }, 'avvio');
 if ((cfg.stripe || cfg.gocardless) && !cfg.pagamentiTipo) app.log.warn('PAGAMENTI_TIPO_DOCUMENTO non impostata: webhook di pagamento disattivati');
 if (!clickup) app.log.warn('ClickUp non configurato: worker e confronto ClickUp disattivati');
+if (clickup && cfg.crm) depsCrm = { pool, api: clickup, cfg: cfg.crm, sla: cfg.ticket.sla, log: app.log, notif };
+if (Object.keys(cfg.ticket.fonti).length === 0) app.log.info('nessuna fonte ticket configurata (TICKET_FONTI): POST /v1/ticket accetta solo n8n e owner');
 
 const depsWorker: DepsWorker | undefined = clickup && cfg.clickup ? { pool, api: clickup, cfg: cfg.clickup, log: app.log, notif } : undefined;
 
@@ -74,6 +108,25 @@ ogni(300, 'ripresa eventi', () => eventi.riprendi());
 if (depsWorker) {
   ogni(cfg.worker.interniSec, 'worker interni', async () => !blocco.bloccato && giroWorker(depsWorker, FONTI_INTERNE, cfg.worker.attesaClickupMin));
   ogni(cfg.worker.esterniSec, 'worker esterni', async () => !blocco.bloccato && giroWorker(depsWorker, FONTI_ESTERNE));
+}
+if (depsCrm && cfg.crm) {
+  // Prima lettura poco dopo l'avvio (non blocca l'avvio), poi a intervalli; i ticket si rileggono tutti una volta al giorno.
+  const crm = depsCrm;
+  if (cfg.crm.clientiListId) setTimeout(() => void giroCrm(crm, 'clienti').catch((e: Error) => app.log.error({ err: e.message }, 'sync clienti fallita')), 20_000).unref();
+  if (cfg.crm.ticketListId) setTimeout(() => void giroCrm(crm, 'ticket').catch((e: Error) => app.log.error({ err: e.message }, 'sync ticket fallita')), 40_000).unref();
+  if (cfg.crm.clientiListId) ogni(cfg.crm.syncClientiMin * 60, 'sync clienti', async () => giroCrm(crm, 'clienti'));
+  if (cfg.crm.ticketListId) ogni(cfg.crm.syncTicketMin * 60, 'sync ticket', async () => giroCrm(crm, 'ticket'));
+}
+if (haBackend) {
+  // Copia dei ticket dei business per filtri, KPI e SLA: prima lettura poco dopo l'avvio, poi ogni TICKET_SYNC_MIN minuti; tutta la lista una volta al giorno.
+  let ultimaCompleta = 0;
+  const giro = async () => {
+    const completa = Date.now() - ultimaCompleta > 24 * 3600_000;
+    const r = await giroTicketRemoti(depsOps, { completa });
+    if (completa && r !== 'occupato') ultimaCompleta = Date.now();
+  };
+  setTimeout(() => void giro().catch((e: Error) => app.log.error({ err: e.message }, 'sync ticket dei business fallita')), 15_000).unref();
+  ogni(cfg.ticket.syncMin * 60, 'sync ticket dei business', giro);
 }
 let ultimoGiorno = '';
 ogni(60, 'riconciliazione', async () => {
