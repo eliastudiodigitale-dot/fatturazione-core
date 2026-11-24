@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerAsyncHook
 import type pg from 'pg';
 import type { Config } from './config.js';
 import type { Notificatore } from './notifiche.js';
+import type { SlaStore } from './sla.js';
 import type { FonteAutenticata } from './auth.js';
 import { dettaglioCliente, elencoClienti, type FiltroClienti } from './crm.js';
 import { ErroreKpi, controllaPeriodo, distribuzioni, kpiClienti, kpiFatturato, kpiTicket, panoramica, perBusiness, serie, statoSync, type FiltroKpi, type Granularita } from './kpi.js';
@@ -18,6 +19,7 @@ export interface DepsCrmApi {
   pool: pg.Pool;
   cfg: Config;
   notif: Notificatore;
+  sla: SlaStore;
   /** Esegue subito una sincronizzazione con ClickUp (solo se CRM configurato). */
   sincronizza?: (parte: ParteSync, completa: boolean) => Promise<Record<string, unknown> | 'occupato'>;
 }
@@ -280,10 +282,11 @@ export function registraScritture(
     // Un ticket "aperto nel futuro" falserebbe l'SLA; uno più vecchio di un anno è quasi certamente un errore di orologio.
     if (aperto && (aperto.getTime() > Date.now() + 5 * 60_000 || aperto.getTime() < Date.now() - 366 * 86_400_000))
       return reply.code(400).send({ errore: 'aperto_il fuori intervallo', codice: 'data_non_valida' });
-    if (b.piano_sla && !pianiAmmessi(d.cfg.ticket.sla).includes(b.piano_sla)) return reply.code(400).send({ errore: 'piano SLA sconosciuto', codice: 'piano_sconosciuto' });
+    const sla = await d.sla.get();
+    if (b.piano_sla && !pianiAmmessi(sla, business).includes(b.piano_sla)) return reply.code(400).send({ errore: 'piano SLA sconosciuto per questa attività', codice: 'piano_sconosciuto' });
     // Se il business ha un backend ticket, il ticket vive lì: qui resta la copia per filtri e SLA (il testo non si conserva).
     const origine = d.cfg.ticket.fonti[fonte]?.backend ? 'remoto' : 'locale';
-    const { ticket, nuovo } = await creaTicket(d.pool, d.cfg.ticket.sla, {
+    const { ticket, nuovo } = await creaTicket(d.pool, sla, {
       fonte, business, idEsterno: b.id_esterno, oggetto: b.oggetto, testo: b.testo, priorita: b.priorita, categoria: b.categoria, canale: b.canale,
       cliente: b.cliente, datiFonte: b.dati_fonte, apertoIl: aperto, pianoSla: b.piano_sla, origine,
     });

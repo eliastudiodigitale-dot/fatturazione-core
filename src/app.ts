@@ -15,6 +15,7 @@ import { AMBITO_TOTALE, ErroreKpi, ErroreRichiesta, registraLetture, registraScr
 import { ErroreTicket } from './ticket.js';
 import { ErroreCrm, type DepsCrmOps } from './crm-ops.js';
 import type { BackendTicket } from './ticket-backend.js';
+import { ErroreSla, SlaStore } from './sla.js';
 import { registraDashboard, type DepsDashboard } from './dashboard.js';
 
 export interface DepsApp {
@@ -31,6 +32,8 @@ export interface DepsApp {
   dashboard?: Pick<DepsDashboard, 'fetchFn' | 'ora'>;
   /** Backend ticket dei business (uno per fonte) e ClickUp per le schede cliente: ciò che rende il portale operativo (#46). */
   operativo?: { backends?: Record<string, BackendTicket>; crm?: Omit<DepsCrmOps, 'pool'> };
+  /** Regole SLA; se manca se ne crea uno sul pool. */
+  sla?: SlaStore;
 }
 
 declare module 'fastify' {
@@ -70,7 +73,7 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
   app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown; code?: string }, req, reply) => {
     if (err instanceof ErroreStato || err instanceof ErroreTicket) return reply.code(err.codice).send({ errore: err.message });
     if (err instanceof ErroreCrm) return reply.code(err.codice).send({ errore: err.message, ...err.extra });
-    if (err instanceof ErroreRichiesta || err instanceof ErroreKpi) return reply.code(400).send({ errore: err.message });
+    if (err instanceof ErroreRichiesta || err instanceof ErroreKpi || err instanceof ErroreSla) return reply.code(400).send({ errore: err.message });
     if (err.validation) return reply.code(400).send({ errore: 'richiesta non valida', dettaglio: err.message });
     const sc = err.statusCode ?? 500;
     if (sc === 413) return reply.code(413).send({ errore: 'body troppo grande' });
@@ -252,13 +255,15 @@ export async function creaApp(deps: DepsApp): Promise<FastifyInstance> {
   // --- CRM e ticket (decisione #45): letture per i token, scritture per le fonti
   const notif: Notificatore = deps.notif ?? { anomalia() {} };
   registraLetture(app, { pool }, '/v1', [autentica(tutti)], () => AMBITO_TOTALE);
-  registraScritture(app, { pool, cfg, notif, sincronizza: deps.sincronizza }, autenticaScrittura, autentica);
+  const sla = deps.sla ?? new SlaStore(pool);
+  registraScritture(app, { pool, cfg, notif, sla, sincronizza: deps.sincronizza }, autenticaScrittura, autentica);
   if (cfg.dashboard)
     await registraDashboard(app, {
       pool,
       cfg: cfg.dashboard,
       appCfg: cfg,
       notif,
+      sla,
       backends: deps.operativo?.backends ?? {},
       crm: { pool, ...deps.operativo?.crm },
       sincronizza: deps.sincronizza,

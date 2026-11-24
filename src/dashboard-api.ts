@@ -8,7 +8,7 @@ import { ErroreRichiesta, mezzanotteRoma, type ParteSync } from './api-crm.js';
 import { ambitoDiSessione, permessiDiSessione, type Permessi, type Sessione } from './dashboard-auth.js';
 import { elencoClienti } from './crm.js';
 import {
-  ErroreCrm, FASI_OPPORTUNITA, TIPI_ATTIVITA, aggiornaAttivita, aggiornaCliente, aggiornaContatto, aggiornaOpportunita, creaAttivita, creaCliente, creaContatto, creaNota, creaOpportunita,
+  ErroreCrm, FASI_OPPORTUNITA, clienteVisibile, TIPI_ATTIVITA, aggiornaAttivita, aggiornaCliente, aggiornaContatto, aggiornaOpportunita, creaAttivita, creaCliente, creaContatto, creaNota, creaOpportunita,
   creaVista, duplicati, eliminaAttivita, eliminaContatto, eliminaNota, eliminaVista, elencoAttivita, elencoOpportunita, elencoViste, impostaPianoCliente, inCsv, modificaNota, schedaCliente,
   utentiAssegnabili, type DepsCrmOps, type Fase,
 } from './crm-ops.js';
@@ -17,11 +17,13 @@ import { PRIORITA, STATI_TICKET, ErroreTicket, elencoTicket, pianiAmmessi, type 
 import { conversazione, creaDaPortale, modifica, rispondi, type DepsOps } from './ticket-ops.js';
 import type { Ambito } from './sql.js';
 import type { BackendTicket } from './ticket-backend.js';
+import { ErroreSla, impostazioniSla, salvaImpostazioniSla, type ImpostazioniSla, type SlaStore } from './sla.js';
 
 export interface DepsOperativo {
   pool: pg.Pool;
   cfg: Config;
   notif: Notificatore;
+  sla: SlaStore;
   backends: Record<string, BackendTicket>;
   crm: DepsCrmOps;
   sincronizza?: (parte: ParteSync, completa: boolean) => Promise<Record<string, unknown> | 'occupato'>;
@@ -67,7 +69,7 @@ const clienteDatiProps = {
 
 export function registraOperativo(app: FastifyInstance, d: DepsOperativo, richiediSessione: preHandlerAsyncHookHandler, urlBase: string) {
   const { pool, cfg } = d;
-  const ops: DepsOps = { pool, cfg, backends: d.backends, notif: d.notif };
+  const ops: DepsOps = { pool, cfg, sla: d.sla, backends: d.backends, notif: d.notif };
   const P = '/dashboard/api';
 
   // Protezione dalle richieste fatte da altri siti con il cookie dell'utente: le scritture devono avere un'intestazione che un altro sito
@@ -99,9 +101,67 @@ export function registraOperativo(app: FastifyInstance, d: DepsOperativo, richie
 
   // ------------------------------------------------------------ me e utenti
   app.get(`${P}/utenti`, { preHandler: lettura }, async (req) => ({ utenti: await utentiAssegnabili(pool, ctx(req).ambito) }));
-  app.get(`${P}/piani-sla`, { preHandler: lettura }, async () => ({ piani: pianiAmmessi(cfg.ticket.sla), dettaglio: cfg.ticket.sla.piani, predefiniti: cfg.ticket.sla.pianoPredefinito,
-    business: [...new Set([...Object.values(cfg.ticket.fonti).map((f) => f.business), ...Object.values(cfg.crm?.alias ?? {})])].sort(),
-  }));
+  /** Attività che il portale conosce anche se non hanno ancora dati: fonti ticket, alias ClickUp, regole SLA. */
+  const attivitaConfigurate = async () => {
+    const sla = await d.sla.get();
+    return [...new Set([...Object.values(cfg.ticket.fonti).map((f) => f.business), ...Object.values(cfg.crm?.alias ?? {}), ...Object.keys(sla.business)])].sort();
+  };
+  /** Piani ammessi per attività (con "nessuno"), per i menu dei ticket e dei clienti. */
+  app.get(`${P}/piani-sla`, { preHandler: lettura }, async () => {
+    const sla = await d.sla.get();
+    return {
+      per_business: Object.fromEntries(Object.keys(sla.business).map((b) => [b, pianiAmmessi(sla, b)])),
+      predefiniti: Object.fromEntries(Object.entries(sla.business).filter(([, v]) => v.pianoPredefinito).map(([b, v]) => [b, v.pianoPredefinito])),
+      business: await attivitaConfigurate(),
+    };
+  });
+
+  // ------------------------------------------------------------ impostazioni SLA (solo owner)
+  const schemaOre = (max: number) => ({ type: 'integer', minimum: 1, maximum: max });
+  const schemaCoppia = obj({ prima_risposta_ore: schemaOre(720), risoluzione_ore: schemaOre(2160) }, ['prima_risposta_ore', 'risoluzione_ore']);
+  app.get(`${P}/impostazioni/sla`, { preHandler: lettura }, async (req) => {
+    consenti(ctx(req).p.impostazioni, 'vedere le impostazioni');
+    return impostazioniSla(pool, await attivitaConfigurate());
+  });
+  app.put<{ Body: ImpostazioniSla }>(
+    `${P}/impostazioni/sla`,
+    {
+      preHandler: scrittura,
+      schema: {
+        body: obj(
+          {
+            predefinito: schemaCoppia,
+            business: {
+              type: 'array',
+              maxItems: 50,
+              items: obj(
+                {
+                  business: businessSchema,
+                  standard: { anyOf: [schemaCoppia, { type: 'null' }] },
+                  piano_predefinito: { anyOf: [{ type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,15}$' }, { type: 'null' }] },
+                  piani: { type: 'array', maxItems: 20, items: obj({ piano: { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]{0,15}$' }, prima_risposta_ore: schemaOre(720), risoluzione_ore: schemaOre(2160) }, ['piano', 'prima_risposta_ore', 'risoluzione_ore']) },
+                },
+                ['business', 'standard', 'piano_predefinito', 'piani'],
+              ),
+            },
+          },
+          ['predefinito', 'business'],
+        ),
+      },
+    },
+    async (req) => {
+      const { p, chi } = ctx(req);
+      consenti(p.impostazioni, 'cambiare le impostazioni');
+      try {
+        await salvaImpostazioniSla(pool, d.sla, req.body, chi);
+      } catch (e) {
+        if (e instanceof ErroreSla) throw new ErroreRichiesta(e.message);
+        throw e;
+      }
+      req.log.info({ chi }, 'impostazioni SLA aggiornate');
+      return impostazioniSla(pool, await attivitaConfigurate());
+    },
+  );
 
   // ------------------------------------------------------------ ticket
   app.post<{ Body: { business: string; oggetto: string; testo?: string; priorita?: Priorita; categoria?: string; cliente?: { nome?: string; email?: string; partita_iva?: string }; piano_sla?: string } }>(
@@ -122,7 +182,7 @@ export function registraOperativo(app: FastifyInstance, d: DepsOperativo, richie
       const { ambito, p, chi } = ctx(req);
       consenti(p.ticketScrive, 'aprire ticket');
       attivitaConsentita(ambito, req.body.business);
-      if (req.body.piano_sla && !pianiAmmessi(cfg.ticket.sla).includes(req.body.piano_sla)) throw new ErroreRichiesta('piano SLA sconosciuto');
+      if (req.body.piano_sla && !pianiAmmessi(await d.sla.get(), req.body.business).includes(req.body.piano_sla)) throw new ErroreRichiesta('piano SLA sconosciuto per questa attività');
       const t = await creaDaPortale(ops, req.body, chi);
       return reply.code(201).send({ ref: t.ref, stato: t.stato, scade_prima_risposta: t.scade_prima_risposta, scade_risoluzione: t.scade_risoluzione });
     },
@@ -198,7 +258,12 @@ export function registraOperativo(app: FastifyInstance, d: DepsOperativo, richie
       const { ambito, p } = ctx(req);
       consenti(p.crmAnagrafica, 'cambiare il piano di assistenza');
       const piano = req.body.piano_sla;
-      if (piano !== null && !pianiAmmessi(cfg.ticket.sla).includes(piano)) throw new ErroreRichiesta('piano SLA sconosciuto');
+      if (piano !== null) {
+        // Il piano vale per le attività del cliente che lo prevedono: deve esistere in almeno una di esse.
+        const cl = await clienteVisibile(pool, ambito, req.params.id);
+        const sla = await d.sla.get();
+        if (!cl.businesses.some((b) => pianiAmmessi(sla, b).includes(piano))) throw new ErroreRichiesta('nessuna attività del cliente ha questo piano SLA');
+      }
       await impostaPianoCliente(pool, ambito, req.params.id, piano);
       return { ok: true };
     },

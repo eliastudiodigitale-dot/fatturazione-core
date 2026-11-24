@@ -4,6 +4,7 @@ import type pg from 'pg';
 import type { Config, DashboardConfig } from './config.js';
 import type { Notificatore } from './notifiche.js';
 import type { BackendTicket } from './ticket-backend.js';
+import type { SlaStore } from './sla.js';
 import { registraUtente, type DepsCrmOps } from './crm-ops.js';
 import { registraOperativo, type DepsOperativo } from './dashboard-api.js';
 import { creaRateLimit } from './ratelimit.js';
@@ -17,6 +18,7 @@ export interface DepsDashboard {
   /** Configurazione completa (SLA, fonti ticket) e ciò che rende il portale operativo. */
   appCfg: Config;
   notif: Notificatore;
+  sla: SlaStore;
   backends: Record<string, BackendTicket>;
   crm: DepsCrmOps;
   sincronizza?: DepsOperativo['sincronizza'];
@@ -118,5 +120,5 @@ export async function registraDashboard(app: FastifyInstance, d: DepsDashboard):
   });
 
   registraLetture(app, { pool: d.pool }, '/dashboard/api', [richiediSessione], (req) => ambitoDiSessione(req.sessione!));
-  registraOperativo(app, { pool: d.pool, cfg: d.appCfg, notif: d.notif, backends: d.backends, crm: d.crm, sincronizza: d.sincronizza }, richiediSessione, cfg.urlBase);
+  registraOperativo(app, { pool: d.pool, cfg: d.appCfg, notif: d.notif, sla: d.sla, backends: d.backends, crm: d.crm, sincronizza: d.sincronizza }, richiediSessione, cfg.urlBase);
 }

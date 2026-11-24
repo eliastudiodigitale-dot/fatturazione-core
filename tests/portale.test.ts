@@ -3,6 +3,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { firma } from '../src/dashboard-auth.js';
 import { scadenze, PIANO_NESSUNO } from '../src/ticket.js';
+import { SlaStore, leggiSla } from '../src/sla.js';
 import { applicaTicketRemoto, giroTicketRemoti } from '../src/ticket-ops.js';
 import { inCsv } from '../src/crm-ops.js';
 import { creaBackendHttp, ticketRemoto } from '../src/ticket-backend.js';
@@ -27,9 +28,11 @@ const ENV_DASH = {
   DASHBOARD_URL_BASE: URL_BASE,
   TICKET_BACKEND_URL_HEYCIAR: 'http://heyciar-backend.platform.svc.cluster.local:8080/api/ticket',
   TICKET_BACKEND_TOKEN_HEYCIAR: 'backend-heyciar-token-di-prova-almeno-32-caratteri',
-  TICKET_SLA_ORE: '',
-  TICKET_PIANO_PREDEFINITO: 'heyciar.it=nessuno',
 };
+
+/** Come in produzione: heyciar.it senza piano a pagamento è senza SLA (best effort). */
+const senzaSlaPerHeyciar = () => admin.query(`UPDATE sla_business SET piano_predefinito = 'nessuno' WHERE business = 'heyciar.it'`);
+const slaStore = () => new SlaStore(pool);
 
 type Ruolo = 'owner' | 'amministrazione' | 'assistenza';
 const cookie = (ruoli: Ruolo[], business: string[] | null = null, sub = 'u1') => ({
@@ -41,6 +44,7 @@ const scrive = { 'x-richiesta': 'portale', origin: URL_BASE };
 async function portale(o: { backend?: BackendFinto; clickup?: ClickUpFinto; extra?: Record<string, string> } = {}) {
   const backend = o.backend ?? new BackendFinto();
   const clickup = o.clickup ?? new ClickUpFinto();
+  await senzaSlaPerHeyciar();
   const cfg = cfgTest({ ...ENV_DASH, ...o.extra });
   const t = await costruisci({ pool, cfg, operativo: { backends: { heyciar: backend }, crm: { api: clickup, cfg: cfg.crm } } });
   return { ...t, backend, clickup, cfg };
@@ -56,30 +60,35 @@ async function ticketHeyciar(app: Awaited<ReturnType<typeof portale>>['app'], id
 }
 
 describe('SLA a piani (#46)', () => {
-  const sla = cfgTest(ENV_DASH).ticket.sla;
   const t0 = new Date('2026-11-01T10:00:00Z');
+  const sla = async () => {
+    await senzaSlaPerHeyciar();
+    return leggiSla(pool);
+  };
 
-  it('piani predefiniti: 48h, 3g, 5g, 7g; il piano ha termini fissi e la priorità non li cambia', () => {
-    expect(Object.keys(sla.piani)).toEqual(['48h', '3g', '5g', '7g']);
-    const normale = scadenze(sla, 'heyciar.it', 'normale', t0, '48h');
-    const urgente = scadenze(sla, 'heyciar.it', 'urgente', t0, '48h');
+  it('heyciar: piani 48h, 3g, 5g, 7g; il piano ha termini fissi e la priorità non li cambia', async () => {
+    const c = await sla();
+    expect(Object.keys(c.business['heyciar.it']!.piani).sort()).toEqual(['3g', '48h', '5g', '7g']);
+    const normale = scadenze(c, 'heyciar.it', 'normale', t0, '48h');
+    const urgente = scadenze(c, 'heyciar.it', 'urgente', t0, '48h');
     expect(normale.risoluzione!.toISOString()).toBe('2026-11-03T10:00:00.000Z');
     expect(urgente.risoluzione!.toISOString()).toBe(normale.risoluzione!.toISOString());
-    expect(scadenze(sla, 'heyciar.it', 'normale', t0, '7g').risoluzione!.toISOString()).toBe('2026-11-08T10:00:00.000Z');
+    expect(scadenze(c, 'heyciar.it', 'normale', t0, '7g').risoluzione!.toISOString()).toBe('2026-11-08T10:00:00.000Z');
     expect(normale.piano).toBe('48h');
   });
-  it('senza piano a pagamento (nessuno) non ci sono scadenze: best effort', () => {
-    const s = scadenze(sla, 'heyciar.it', 'normale', t0);
-    expect(s).toEqual({ primaRisposta: null, risoluzione: null, piano: PIANO_NESSUNO });
-    expect(scadenze(sla, 'heyciar.it', 'urgente', t0, 'nessuno').risoluzione).toBeNull();
+  it('senza piano a pagamento (nessuno) non ci sono scadenze: best effort', async () => {
+    const c = await sla();
+    expect(scadenze(c, 'heyciar.it', 'normale', t0)).toEqual({ primaRisposta: null, risoluzione: null, piano: PIANO_NESSUNO });
+    expect(scadenze(c, 'heyciar.it', 'urgente', t0, 'nessuno').risoluzione).toBeNull();
   });
-  it('le altre attività restano con lo SLA standard scalato dalla priorità; piano sconosciuto: errore', () => {
-    expect(scadenze(sla, 'reti.gazzolaelia.it', 'normale', t0).piano).toBeNull();
-    expect(scadenze(sla, 'reti.gazzolaelia.it', 'normale', t0).primaRisposta!.toISOString()).toBe('2026-11-02T10:00:00.000Z');
-    expect(() => scadenze(sla, 'heyciar.it', 'normale', t0, '9g')).toThrow('9g');
+  it('le altre attività: SLA di partenza 24/72 scalato dalla priorità; i loro piani sono solo i propri', async () => {
+    const c = await sla();
+    expect(scadenze(c, 'reti.gazzolaelia.it', 'normale', t0).piano).toBeNull();
+    expect(scadenze(c, 'reti.gazzolaelia.it', 'normale', t0).primaRisposta!.toISOString()).toBe('2026-11-02T10:00:00.000Z');
+    expect(() => scadenze(c, 'heyciar.it', 'normale', t0, '9g')).toThrow('9g');
+    expect(() => scadenze(c, 'reti.gazzolaelia.it', 'normale', t0, '48h')).toThrow('48h');
   });
-  it('configurazione: piano predefinito deve esistere, backend https (http solo nel cluster) con token', () => {
-    expect(() => cfgTest({ ...ENV_DASH, TICKET_PIANO_PREDEFINITO: 'heyciar.it=platinum' })).toThrow('TICKET_PIANO_PREDEFINITO');
+  it('configurazione: backend https (http solo nel cluster) con token; le regole SLA non sono più nelle variabili', () => {
     expect(() => cfgTest({ ...ENV_DASH, TICKET_BACKEND_URL_HEYCIAR: 'http://example.org/api' })).toThrow('https');
     expect(() => cfgTest({ ...ENV_DASH, TICKET_BACKEND_TOKEN_HEYCIAR: undefined as never })).toThrow('TICKET_BACKEND_TOKEN_HEYCIAR');
     expect(() => cfgTest({ ...ENV_DASH, TICKET_BACKEND_URL_HEYCIAR: 'https://user:pw@example.org/api' })).toThrow('credenziali');
@@ -105,6 +114,109 @@ describe('SLA a piani (#46)', () => {
     await app.inject({ method: 'POST', url: '/v1/ticket/heyciar%7Ch1/messaggi', headers: AUTH_FONTE.heyciar, payload: { da: 'staff', testo: 'ok' } });
     const k = (await app.inject({ method: 'GET', url: '/dashboard/api/kpi/ticket', headers: OWNER })).json();
     expect(k.ticket.sla_prima_risposta_pct ?? null).toBeNull();
+    await app.close();
+  });
+});
+
+describe('impostazioni SLA dal portale (#46)', () => {
+  const url = '/dashboard/api/impostazioni/sla';
+  const heyciar = { business: 'heyciar.it', standard: null, piano_predefinito: 'nessuno', piani: [{ piano: '48h', prima_risposta_ore: 24, risoluzione_ore: 48 }, { piano: '3g', prima_risposta_ore: 36, risoluzione_ore: 72 }] };
+  const reti = (extra: Record<string, unknown> = {}) => ({ business: 'reti.gazzolaelia.it', standard: { prima_risposta_ore: 8, risoluzione_ore: 24 }, piano_predefinito: null, piani: [{ piano: 'oro', prima_risposta_ore: 2, risoluzione_ore: 4 }], ...extra });
+  const put = (app: Awaited<ReturnType<typeof portale>>['app'], body: unknown, h: Record<string, string> = { ...OWNER, ...scrive }) => app.inject({ method: 'PUT', url, headers: h, payload: body as never });
+
+  it('lettura: valori di partenza, piani di heyciar e anche le attività senza regole', async () => {
+    const { app } = await portale();
+    const r = (await app.inject({ method: 'GET', url, headers: OWNER })).json();
+    expect(r.predefinito).toEqual({ prima_risposta_ore: 24, risoluzione_ore: 72 });
+    const h = r.business.find((b: { business: string }) => b.business === 'heyciar.it');
+    expect(h.piano_predefinito).toBe('nessuno');
+    expect(h.piani.map((p: { piano: string }) => p.piano).sort()).toEqual(['3g', '48h', '5g', '7g']);
+    expect(r.business.map((b: { business: string }) => b.business)).toEqual(expect.arrayContaining(['heyciar.it', 'serrandasu.it', 'reti.gazzolaelia.it']));
+    await app.close();
+  });
+
+  it('una modifica vale subito per i ticket nuovi, senza riavviare; i ticket già aperti non cambiano', async () => {
+    const { app } = await portale();
+    const prima = await app.inject({ method: 'POST', url: '/v1/ticket', headers: AUTH_FONTE.reti, payload: { id_esterno: 'r0', oggetto: 'Prima' } });
+    const scadPrima = prima.json().scade_risoluzione;
+    const r = await put(app, { predefinito: { prima_risposta_ore: 24, risoluzione_ore: 72 }, business: [heyciar, reti({ piano_predefinito: 'oro' })] });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().business.find((b: { business: string }) => b.business === 'reti.gazzolaelia.it').piano_predefinito).toBe('oro');
+    const dopo = (await app.inject({ method: 'POST', url: '/v1/ticket', headers: AUTH_FONTE.reti, payload: { id_esterno: 'r1', oggetto: 'Dopo' } })).json();
+    expect(dopo.piano_sla).toBe('oro');
+    expect(new Date(dopo.scade_risoluzione).getTime() - Date.now()).toBeLessThan(4.1 * 3600_000);
+    expect((await admin.query(`SELECT scade_risoluzione FROM ticket WHERE ref = 'reti|r0'`)).rows[0].scade_risoluzione.toISOString()).toBe(new Date(scadPrima).toISOString());
+    await app.close();
+  });
+
+  it('SLA standard di un\'attività: sostituisce il valore di partenza ed è scalato dalla priorità', async () => {
+    const { app } = await portale();
+    await put(app, { predefinito: { prima_risposta_ore: 24, risoluzione_ore: 72 }, business: [heyciar, reti()] });
+    const t = (await app.inject({ method: 'POST', url: '/v1/ticket', headers: AUTH_FONTE.reti, payload: { id_esterno: 'r2', oggetto: 'x', priorita: 'urgente' } })).json();
+    // 24 ore di risoluzione standard x 0,25 per l'urgente = 6 ore
+    expect(new Date(t.scade_risoluzione).getTime() - Date.now()).toBeLessThan(6.1 * 3600_000);
+    expect(new Date(t.scade_risoluzione).getTime() - Date.now()).toBeGreaterThan(5.9 * 3600_000);
+    await app.close();
+  });
+
+  it('un piano tolto resta nel DB ma non si può più assegnare; i ticket che lo avevano non cambiano', async () => {
+    const { app } = await portale();
+    const a = await ticketHeyciar(app, 'h1', { piano_sla: '48h' });
+    const r = await put(app, { predefinito: { prima_risposta_ore: 24, risoluzione_ore: 72 }, business: [{ ...heyciar, piani: [{ piano: '3g', prima_risposta_ore: 36, risoluzione_ore: 72 }] }] });
+    expect(r.statusCode).toBe(200);
+    expect((await admin.query(`SELECT piano, attivo FROM sla_piani WHERE business = 'heyciar.it' ORDER BY piano`)).rows).toEqual([
+      { piano: '3g', attivo: true }, { piano: '48h', attivo: false }, { piano: '5g', attivo: false }, { piano: '7g', attivo: false },
+    ]);
+    expect((await app.inject({ method: 'POST', url: '/v1/ticket', headers: AUTH_FONTE.heyciar, payload: { id_esterno: 'h2', oggetto: 'x', piano_sla: '48h' } })).statusCode).toBe(400);
+    expect((await admin.query(`SELECT piano_sla, scade_risoluzione FROM ticket WHERE ref = 'heyciar|h1'`)).rows[0]).toMatchObject({ piano_sla: '48h' });
+    expect(new Date((await admin.query(`SELECT scade_risoluzione FROM ticket WHERE ref = 'heyciar|h1'`)).rows[0].scade_risoluzione).toISOString()).toBe(new Date(a.scade_risoluzione).toISOString());
+    // cambiare la priorità di quel ticket non si blocca per il piano ormai tolto: ricade sullo standard
+    expect((await app.inject({ method: 'PATCH', url: '/dashboard/api/ticket/heyciar%7Ch1', headers: { ...OWNER, ...scrive }, payload: { priorita: 'alta' } })).statusCode).toBe(200);
+    // un piano tolto si può rimettere
+    await put(app, { predefinito: { prima_risposta_ore: 24, risoluzione_ore: 72 }, business: [heyciar] });
+    expect((await admin.query(`SELECT attivo FROM sla_piani WHERE business = 'heyciar.it' AND piano = '48h'`)).rows[0].attivo).toBe(true);
+    await app.close();
+  });
+
+  it('valori sbagliati: errore chiaro e nessuna modifica', async () => {
+    const { app } = await portale();
+    const base = { predefinito: { prima_risposta_ore: 24, risoluzione_ore: 72 } };
+    const casi: [unknown, string][] = [
+      [{ ...base, business: [reti({ standard: { prima_risposta_ore: 30, risoluzione_ore: 10 } })] }, 'non può superare'],
+      [{ ...base, business: [reti({ piano_predefinito: 'platino' })] }, 'non esiste'],
+      [{ ...base, business: [reti({ piani: [{ piano: 'nessuno', prima_risposta_ore: 1, risoluzione_ore: 2 }] })] }, 'nome piano non valido'],
+      [{ ...base, business: [reti({ piani: [{ piano: 'oro', prima_risposta_ore: 1, risoluzione_ore: 2 }, { piano: 'oro', prima_risposta_ore: 1, risoluzione_ore: 2 }] })] }, 'ripetuto'],
+      [{ ...base, business: [reti(), reti()] }, 'ripetuta'],
+      [{ predefinito: { prima_risposta_ore: 100, risoluzione_ore: 50 }, business: [] }, 'non può superare'],
+    ];
+    for (const [corpo, testo] of casi) {
+      const r = await put(app, corpo);
+      expect(r.statusCode).toBe(400);
+      expect(r.body).toContain(testo);
+    }
+    for (const corpo of [{ ...base, business: [reti({ standard: { prima_risposta_ore: 0, risoluzione_ore: 5 } })] }, { ...base, business: [reti({ extra: 1 })] }, { business: [] }]) expect((await put(app, corpo)).statusCode).toBe(400);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM sla_business WHERE business = 'reti.gazzolaelia.it'`)).rows[0].n).toBe(0);
+    await app.close();
+  });
+
+  it('solo owner, e solo con la protezione CSRF', async () => {
+    const { app } = await portale();
+    const corpo = { predefinito: { prima_risposta_ore: 24, risoluzione_ore: 72 }, business: [] };
+    for (const ruolo of ['amministrazione', 'assistenza'] as Ruolo[]) {
+      const h = cookie([ruolo], ['heyciar.it']);
+      expect((await app.inject({ method: 'GET', url, headers: h })).statusCode).toBe(403);
+      expect((await put(app, corpo, { ...h, ...scrive })).statusCode).toBe(403);
+    }
+    expect((await put(app, corpo, OWNER)).statusCode).toBe(403);
+    expect((await put(app, corpo)).statusCode).toBe(200);
+    await app.close();
+  });
+
+  it('piani per attività disponibili ai menu', async () => {
+    const { app } = await portale();
+    const r = (await app.inject({ method: 'GET', url: '/dashboard/api/piani-sla', headers: cookie(['assistenza'], ['heyciar.it']) })).json();
+    expect(r.per_business['heyciar.it'].sort()).toEqual(['3g', '48h', '5g', '7g', 'nessuno']);
+    expect(r.predefiniti['heyciar.it']).toBe('nessuno');
     await app.close();
   });
 });
@@ -206,7 +318,7 @@ describe('ticket nei backend dei business', () => {
   it('sincronizzazione: crea i nuovi, aggiorna i cambiati, usa le date vere del backend, un backend giù non ferma il giro', async () => {
     const { backend, cfg } = await portale();
     const notif = { lista: [] as string[], anomalia: (c: string) => void notif.lista.push(c) };
-    const d = { pool, cfg, backends: { heyciar: backend }, notif };
+    const d = { pool, cfg, sla: slaStore(), backends: { heyciar: backend }, notif };
     const aperto = new Date(Date.now() - 5 * 3600_000).toISOString();
     backend.ticket = [remoto('a', { aperto_il: aperto }), remoto('b', { stato: 'in_lavorazione', assegnato_a: 'anna' })];
     expect(await giroTicketRemoti(d)).toMatchObject({ heyciar: { letti: 2, nuovi: 2, aggiornati: 0 } });

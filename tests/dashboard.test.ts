@@ -170,7 +170,7 @@ describe('accesso', () => {
     const me = (await app.inject({ method: 'GET', url: '/dashboard/api/me', headers: h })).json();
     expect(me).toEqual({
       nome: 'Elia Prova', email: 'elia@example.org', ruoli: ['owner'], business: null, soldi: true,
-      permessi: { ticketScrive: true, crmScrive: true, crmAnagrafica: true, fatture: true, sync: true },
+      permessi: { ticketScrive: true, crmScrive: true, crmAnagrafica: true, fatture: true, sync: true, impostazioni: true },
     });
     expect((await app.inject({ method: 'GET', url: '/dashboard/api/ticket', headers: h })).json().totale).toBe(3);
     const kpi = (await app.inject({ method: 'GET', url: '/dashboard/api/kpi/panoramica?giorni=30', headers: h })).json();

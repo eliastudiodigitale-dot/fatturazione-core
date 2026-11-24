@@ -2,15 +2,18 @@
 // Prima l'API del business, poi il DB: se il backend rifiuta o non risponde, la copia non cambia e l'utente vede l'errore.
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
-import type { Config } from './config.js';
+import type { Config, SlaConfig } from './config.js';
 import type { Notificatore } from './notifiche.js';
 import { ErroreBackend, type BackendTicket, type ModificaRemota, type TicketRemoto } from './ticket-backend.js';
-import { ErroreTicket, aggiornaTicket, aggiungiMessaggio, creaTicket, messaggiLocali, ticketPerRef, type ModificaTicket, type NuovoTicket, type Priorita, type Ticket } from './ticket.js';
+import { ErroreTicket, aggiornaTicket, aggiungiMessaggio, creaTicket, messaggiLocali, pianiAmmessi, ticketPerRef, type ModificaTicket, type NuovoTicket, type Priorita, type Ticket } from './ticket.js';
 import { conLockCrm, segna } from './sync.js';
+import type { SlaStore } from './sla.js';
 
 export interface DepsOps {
   pool: pg.Pool;
   cfg: Config;
+  /** Regole SLA (DB, modificabili dal portale). */
+  sla: SlaStore;
   /** Un backend per fonte (solo le fonti che ne hanno uno configurato). */
   backends: Record<string, BackendTicket>;
   notif: Notificatore;
@@ -43,10 +46,10 @@ export async function creaDaPortale(d: DepsOps, n: NuovoDaPortale, chi: string):
   const base: NuovoTicket = { fonte: fonte ?? 'dashboard', business: n.business, idEsterno: '', oggetto: n.oggetto, testo: n.testo, priorita: n.priorita, categoria: n.categoria, canale: 'portale', cliente: n.cliente, pianoSla: n.piano_sla };
   if (backend) {
     const r = await backend.crea({ oggetto: n.oggetto, testo: n.testo, priorita: n.priorita, categoria: n.categoria, cliente: n.cliente, creato_da: chi }).catch(comeErrore);
-    const { ticket } = await creaTicket(d.pool, d.cfg.ticket.sla, { ...base, idEsterno: r.id, origine: 'remoto' });
+    const { ticket } = await creaTicket(d.pool, await d.sla.get(), { ...base, idEsterno: r.id, origine: 'remoto' });
     return ticket;
   }
-  const { ticket } = await creaTicket(d.pool, d.cfg.ticket.sla, { ...base, idEsterno: randomUUID(), origine: 'locale' });
+  const { ticket } = await creaTicket(d.pool, await d.sla.get(), { ...base, idEsterno: randomUUID(), origine: 'locale' });
   return ticket;
 }
 
@@ -60,7 +63,8 @@ const backendDi = (d: DepsOps, t: Ticket): BackendTicket => {
 export async function modifica(d: DepsOps, ref: string, mod: ModificaTicket, chi: string): Promise<Ticket> {
   const t = await ticketPerRef(d.pool, ref);
   if (!t) throw new ErroreTicket(404, 'ticket non trovato');
-  if (mod.piano_sla !== undefined && mod.piano_sla !== 'nessuno' && mod.piano_sla !== 'standard' && !d.cfg.ticket.sla.piani[mod.piano_sla]) throw new ErroreTicket(400, `piano SLA sconosciuto: ${mod.piano_sla}`);
+  const sla = await d.sla.get();
+  if (mod.piano_sla !== undefined && mod.piano_sla !== 'standard' && !pianiAmmessi(sla, t.business).includes(mod.piano_sla)) throw new ErroreTicket(400, `piano SLA sconosciuto per ${t.business}: ${mod.piano_sla}`);
   if (t.origine === 'remoto') {
     const r: ModificaRemota = {};
     if (mod.stato !== undefined) r.stato = mod.stato;
@@ -69,7 +73,7 @@ export async function modifica(d: DepsOps, ref: string, mod: ModificaTicket, chi
     if (mod.categoria !== undefined) r.categoria = mod.categoria.trim() === '' ? null : mod.categoria.trim();
     if (Object.keys(r).length > 0) await backendDi(d, t).aggiorna(t.id_remoto!, r).catch(comeErrore);
   }
-  return aggiornaTicket(d.pool, d.cfg.ticket.sla, ref, mod, chi);
+  return aggiornaTicket(d.pool, sla, ref, mod, chi);
 }
 
 /** Risposta al cliente (o nota interna) dal portale. */
@@ -105,13 +109,14 @@ export async function conversazione(d: DepsOps, ref: string): Promise<{ messaggi
 // ------------------------------------------------------------------ sincronizzazione dei ticket remoti
 
 /** Aggiorna la copia di un ticket remoto già noto, o lo crea. Restituisce cosa è successo. */
-export async function applicaTicketRemoto(d: Pick<DepsOps, 'pool' | 'cfg'>, fonte: string, business: string, t: TicketRemoto): Promise<'nuovo' | 'aggiornato' | 'uguale'> {
+export async function applicaTicketRemoto(d: Pick<DepsOps, 'pool' | 'cfg' | 'sla'>, fonte: string, business: string, t: TicketRemoto): Promise<'nuovo' | 'aggiornato' | 'uguale'> {
   const ref = `${fonte}|${t.id}`;
+  const sla = await d.sla.get();
   const esiste = await ticketPerRef(d.pool, ref);
   if (!esiste) {
-    await creaTicket(d.pool, d.cfg.ticket.sla, {
+    await creaTicket(d.pool, sla, {
       fonte, business, idEsterno: t.id, origine: 'remoto', oggetto: t.oggetto, priorita: t.priorita, stato: t.stato, categoria: t.categoria, canale: t.canale,
-      cliente: t.cliente, assegnatoA: t.assegnato_a, apertoIl: t.aperto_il, primaRispostaIl: t.prima_risposta_il, risoltoIl: t.risolto_il, pianoSla: pianoNoto(d.cfg, t.piano_sla),
+      cliente: t.cliente, assegnatoA: t.assegnato_a, apertoIl: t.aperto_il, primaRispostaIl: t.prima_risposta_il, risoltoIl: t.risolto_il, pianoSla: pianoNoto(sla, business, t.piano_sla),
     });
     return 'nuovo';
   }
@@ -120,10 +125,10 @@ export async function applicaTicketRemoto(d: Pick<DepsOps, 'pool' | 'cfg'>, font
   if (t.priorita !== esiste.priorita) mod.priorita = t.priorita;
   if ((t.assegnato_a ?? '') !== (esiste.assegnato_a ?? '')) mod.assegnato_a = t.assegnato_a ?? '';
   if ((t.categoria ?? '') !== (esiste.categoria ?? '')) mod.categoria = t.categoria ?? '';
-  const piano = pianoNoto(d.cfg, t.piano_sla);
+  const piano = pianoNoto(sla, business, t.piano_sla);
   if (piano && piano !== esiste.piano_sla) mod.piano_sla = piano;
   let cambiato = Object.keys(mod).length > 0;
-  if (cambiato) await aggiornaTicket(d.pool, d.cfg.ticket.sla, ref, mod, `sync:${fonte}`);
+  if (cambiato) await aggiornaTicket(d.pool, sla, ref, mod, `sync:${fonte}`);
   // Gli orari veri li ha il backend: la prima risposta e la risoluzione non si "inventano" con l'orologio del portale.
   const r = await d.pool.query(
     `UPDATE ticket SET prima_risposta_il = COALESCE(prima_risposta_il, $2), risolto_il = CASE WHEN stato IN ('risolto','chiuso') THEN COALESCE($3, risolto_il) ELSE NULL END,
@@ -135,7 +140,7 @@ export async function applicaTicketRemoto(d: Pick<DepsOps, 'pool' | 'cfg'>, font
   return cambiato ? 'aggiornato' : 'uguale';
 }
 
-const pianoNoto = (cfg: Config, p?: string): string | undefined => (p && (p === 'nessuno' || cfg.ticket.sla.piani[p]) ? p : undefined);
+const pianoNoto = (sla: SlaConfig, business: string, p?: string): string | undefined => (p && pianiAmmessi(sla, business).includes(p) ? p : undefined);
 
 /** Rilegge i ticket di una fonte dal suo backend: solo i cambiati dall'ultimo giro (con margine), tutti se `completa`. */
 export async function sincronizzaFonte(d: DepsOps, fonte: string, o: { completa?: boolean } = {}): Promise<{ letti: number; nuovi: number; aggiornati: number }> {

@@ -1,7 +1,8 @@
 // Ticket dalle fonti (heyciar, serrandasu.it, reti): token per fonte, idempotenza, SLA, messaggi, filtri (decisione #45).
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { leggiSla } from '../src/sla.js';
 import { AUTH, AUTH_FONTE, admin, costruisci, poolApp, svuota } from './helpers.js';
-import { statoDaClickUp, scadenze } from '../src/ticket.js';
+import { scadenze } from '../src/ticket.js';
 import { cfgTest } from './helpers.js';
 
 const pool = poolApp();
@@ -186,19 +187,8 @@ describe('GET /v1/ticket (filtri)', () => {
 });
 
 describe('regole pure', () => {
-  it('statoDaClickUp riconosce i nomi per parola, poi per tipo', () => {
-    const s = (nome: string, tipo = 'custom') => statoDaClickUp({ nome, tipo });
-    expect(s('to do', 'open')).toBe('aperto');
-    expect(s('In lavorazione')).toBe('in_lavorazione');
-    expect(s('IN ATTESA DEL CLIENTE')).toBe('in_attesa_cliente');
-    expect(s('Risolto', 'closed')).toBe('risolto');
-    expect(s('Closed', 'closed')).toBe('chiuso');
-    expect(s('Completato', 'done')).toBe('risolto');
-    expect(s('qualcosa', 'closed')).toBe('chiuso');
-  });
-
-  it('scadenze: la priorità scala i tempi', () => {
-    const sla = cfgTest().ticket.sla;
+  it('scadenze: la priorità scala i tempi', async () => {
+    const sla = await leggiSla(admin);
     const t0 = new Date('2026-11-01T10:00:00Z');
     expect(scadenze(sla, 'x.it', 'normale', t0).primaRisposta!.toISOString()).toBe('2026-11-02T10:00:00.000Z');
     expect(scadenze(sla, 'x.it', 'bassa', t0).primaRisposta!.toISOString()).toBe('2026-11-03T10:00:00.000Z');

@@ -19,9 +19,6 @@ export interface NuovaTask {
   nome: string;
   descrizione: string;
   campi: { id: string; value: ValoreCampo; value_options?: { time: boolean } }[];
-  /** Priorità ClickUp: 1 urgente, 2 alta, 3 normale, 4 bassa. */
-  priorita?: number;
-  tag?: string[];
 }
 
 /** Task di una lista CRM (clienti o ticket) già normalizzata: i campi custom sono testo, per ID campo. */
@@ -56,8 +53,6 @@ export interface ClickUpApi {
   campiLista(listId: string): Promise<CampoLista[]>;
   /** Task di una lista CRM, anche chiuse e archiviate. Con `modificateDopo` solo quelle cambiate da quella data. */
   elencaTaskCrm(listId: string, o?: { modificateDopo?: Date }): Promise<TaskCrm[]>;
-  /** Commento sulla task (i messaggi dei clienti arrivati dalle fonti). */
-  commenta(taskId: string, testo: string): Promise<void>;
   /** Cambia nome e/o stato (per nome) di una task: la scheda cliente modificata dal portale. */
   aggiornaTask(taskId: string, mod: { nome?: string; stato?: string }): Promise<void>;
   /** Imposta un campo custom della task; `null` lo svuota. */
@@ -265,17 +260,12 @@ export function creaClickUp(o: { token: string; apiUrl: string; rpm: number; cam
         name: t.nome,
         markdown_description: t.descrizione,
         custom_fields: t.campi,
-        ...(t.priorita ? { priority: t.priorita } : {}),
-        ...(t.tag?.length ? { tags: t.tag } : {}),
       })) as { id: string };
       return r.id;
     },
     async elencaTaskCrm(listId, opz = {}) {
       const dopo = opz.modificateDopo ? `&date_updated_gt=${opz.modificateDopo.getTime()}` : '';
       return ((await pagine(listId, dopo)) as RawTaskCrm[]).map(taskCrm);
-    },
-    async commenta(taskId, testo) {
-      await richiesta('POST', `/task/${encodeURIComponent(taskId)}/comment`, { comment_text: testo, notify_all: false });
     },
     async aggiornaTask(taskId, mod) {
       await richiesta('PUT', `/task/${encodeURIComponent(taskId)}`, { ...(mod.nome !== undefined ? { name: mod.nome } : {}), ...(mod.stato !== undefined ? { status: mod.stato } : {}) });

@@ -11,19 +11,16 @@ export const STATI_CHIUSI: StatoTicket[] = ['risolto', 'chiuso'];
 
 /** La priorità scala i tempi dell'SLA: un urgente ha un quarto del tempo, un ticket a bassa priorità il doppio. */
 const MOLTIPLICATORE: Record<Priorita, number> = { urgente: 0.25, alta: 0.5, normale: 1, bassa: 2 };
-/** Priorità ClickUp: 1 urgente ... 4 bassa. */
-export const PRIORITA_CLICKUP: Record<Priorita, number> = { urgente: 1, alta: 2, normale: 3, bassa: 4 };
-export const prioritaDaClickUp = (n: number | null): Priorita | undefined => (n ? PRIORITA[n - 1] : undefined);
 
 /** Valore di `ticket.piano_sla` quando il cliente non ha un piano a pagamento: nessuno SLA, best effort (#46). */
 export const PIANO_NESSUNO = 'nessuno';
 
 /**
- * Scadenze SLA in ore di calendario (non lavorative), dall'apertura del ticket (#46):
- * - piano a pagamento (es. 48h, 3g, 5g, 7g): termini fissi del piano, la priorità non li cambia;
+ * Scadenze SLA in ore di calendario (non lavorative), dall'apertura del ticket (#46). Le regole sono quelle dell'attività (DB, modificabili dal portale):
+ * - piano a pagamento dell'attività (es. 48h, 3g, 5g, 7g): termini fissi del piano, la priorità non li cambia;
  * - piano "nessuno": nessuna scadenza (best effort);
- * - nessun piano indicato: piano predefinito dell'attività se c'è, altrimenti SLA standard dell'attività scalato dalla priorità.
- * `piano` restituito: il valore da salvare in ticket.piano_sla (null = SLA standard dell'attività).
+ * - nessun piano indicato: piano predefinito dell'attività se c'è, altrimenti SLA standard dell'attività (o quello di partenza) scalato dalla priorità.
+ * `piano` restituito: il valore da salvare in ticket.piano_sla (null = SLA standard).
  */
 export function scadenze(
   sla: SlaConfig,
@@ -32,33 +29,23 @@ export function scadenze(
   apertoIl: Date,
   piano?: string | null,
 ): { primaRisposta: Date | null; risoluzione: Date | null; piano: string | null } {
-  const scelto = piano ?? sla.pianoPredefinito[business] ?? null;
+  const b = sla.business[business];
+  const scelto = piano ?? b?.pianoPredefinito ?? null;
   if (scelto === PIANO_NESSUNO) return { primaRisposta: null, risoluzione: null, piano: PIANO_NESSUNO };
   const quando = (h: number, m: number) => new Date(apertoIl.getTime() + Math.round(h * m * 3600_000));
   if (scelto) {
-    const p = sla.piani[scelto];
-    if (!p) throw new ErroreTicket(400, `piano SLA sconosciuto: ${scelto}`);
-    return { primaRisposta: quando(p.primaRispostaOre, 1), risoluzione: quando(p.risoluzioneOre, 1), piano: scelto };
+    const p = b?.piani[scelto];
+    // Un piano esplicito che l'attività non ha è un errore; uno solo "ereditato" e poi tolto dalle impostazioni ricade sullo standard.
+    if (!p && piano) throw new ErroreTicket(400, `piano SLA sconosciuto per ${business}: ${scelto}`);
+    if (p) return { primaRisposta: quando(p.primaRispostaOre, 1), risoluzione: quando(p.risoluzioneOre, 1), piano: scelto };
   }
-  const base = sla.perBusiness[business] ?? { primaRispostaOre: sla.primaRispostaOre, risoluzioneOre: sla.risoluzioneOre };
+  const base = b?.standard ?? sla.predefinito;
   const m = MOLTIPLICATORE[priorita];
   return { primaRisposta: quando(base.primaRispostaOre, m), risoluzione: quando(base.risoluzioneOre, m), piano: null };
 }
 
-/** Nomi dei piani ammessi (compreso "nessuno"), per i menu e per validare le richieste. */
-export const pianiAmmessi = (sla: SlaConfig): string[] => [PIANO_NESSUNO, ...Object.keys(sla.piani)];
-
-/** Stato interno a partire dallo stato ClickUp (nome e tipo): i nomi esatti possono cambiare, per questo si riconoscono per parola. */
-export function statoDaClickUp(stato: { nome: string; tipo: string }): StatoTicket {
-  const n = stato.nome.toLowerCase();
-  if (/risolt|resolved|done|complet/.test(n)) return 'risolto';
-  if (/chius|closed/.test(n)) return 'chiuso';
-  if (/attesa|waiting|pending|sospes|on hold/.test(n)) return 'in_attesa_cliente';
-  if (/lavoraz|progress|corso|working|review|revision/.test(n)) return 'in_lavorazione';
-  if (stato.tipo === 'closed') return 'chiuso';
-  if (stato.tipo === 'done') return 'risolto';
-  return 'aperto';
-}
+/** Piani ammessi per un'attività (compreso "nessuno"), per i menu e per validare le richieste. */
+export const pianiAmmessi = (sla: SlaConfig, business: string): string[] => [PIANO_NESSUNO, ...Object.keys(sla.business[business]?.piani ?? {})];
 
 export interface Ticket {
   id: string;
@@ -84,7 +71,6 @@ export interface Ticket {
   risolto_il: Date | null;
   scade_prima_risposta: Date | null;
   scade_risoluzione: Date | null;
-  clickup_task_id: string | null;
   dati_fonte: Record<string, unknown>;
 }
 
@@ -138,7 +124,7 @@ export async function creaTicket(pool: pg.Pool, sla: SlaConfig, n: NuovoTicket):
     const clienteTask = await trovaCliente(c, { email: n.cliente?.email, partita_iva: n.cliente?.partita_iva });
     // Piano: esplicito, poi quello del cliente, poi il predefinito dell'attività (in scadenze).
     const pianoCliente = n.pianoSla ? undefined : clienteTask ? (await c.query<{ piano_sla: string | null }>('SELECT piano_sla FROM crm_clienti WHERE clickup_task_id = $1', [clienteTask])).rows[0]?.piano_sla : undefined;
-    const pianoValido = (p?: string | null) => (p && (p === PIANO_NESSUNO || sla.piani[p]) ? p : undefined);
+    const pianoValido = (p?: string | null) => (p && pianiAmmessi(sla, n.business).includes(p) ? p : undefined);
     const sc = scadenze(sla, n.business, priorita, aperto, n.pianoSla ?? pianoValido(pianoCliente));
     const origine = n.origine ?? 'locale';
     const r = await c.query<Ticket>(
@@ -239,7 +225,9 @@ export async function aggiornaTicket(pool: pg.Pool, sla: SlaConfig, ref: string,
     if (mod.priorita !== undefined && mod.priorita !== t.priorita) eventi.push({ tipo: 'priorita', dettaglio: { da: t.priorita, a: mod.priorita } });
     if (mod.piano_sla !== undefined && pianoNuovo !== t.piano_sla) eventi.push({ tipo: 'piano_sla', dettaglio: { da: t.piano_sla, a: pianoNuovo } });
     if (eventi.some((e) => e.tipo === 'priorita' || e.tipo === 'piano_sla')) {
-      const sc = scadenze(sla, t.business, prioritaNuova, new Date(t.aperto_il), pianoNuovo);
+      // Un piano ormai tolto dalle impostazioni non blocca il cambio di priorità: si ricade sullo SLA standard.
+      const ancoraValido = pianoNuovo === null || pianiAmmessi(sla, t.business).includes(pianoNuovo);
+      const sc = scadenze(sla, t.business, prioritaNuova, new Date(t.aperto_il), mod.piano_sla !== undefined || ancoraValido ? pianoNuovo : null);
       campo('priorita', prioritaNuova);
       campo('piano_sla', sc.piano);
       campo('scade_prima_risposta', sc.primaRisposta);
@@ -288,7 +276,7 @@ export const SLA_RISPOSTA_SCADUTA = `(prima_risposta_il IS NULL AND scade_prima_
 export const SLA_RISOLUZIONE_SCADUTA = `(risolto_il IS NULL AND scade_risoluzione < now() AND ${APERTO})`;
 
 const COLONNE = `id, ref, fonte, origine, piano_sla, business, oggetto, priorita, stato, categoria, canale, cliente_nome, cliente_email, cliente_task_id, assegnato_a,
-  aperto_il, prima_risposta_il, risolto_il, scade_prima_risposta, scade_risoluzione, clickup_task_id,
+  aperto_il, prima_risposta_il, risolto_il, scade_prima_risposta, scade_risoluzione,
   ${SLA_RISPOSTA_SCADUTA} AS sla_risposta_scaduta, ${SLA_RISOLUZIONE_SCADUTA} AS sla_risoluzione_scaduta`;
 
 const ORDINI: Record<NonNullable<FiltroTicket['ordine']>, string> = {

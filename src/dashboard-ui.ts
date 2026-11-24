@@ -156,7 +156,10 @@ function spunta(id){var e=$('#'+id);return Boolean(e&&e.checked);}
 function businessBox(prefisso,scelti){return (S.opz.business||[]).map(function(b,i){return '<label class="ck"><input type="checkbox" id="'+prefisso+i+'" data-b="'+esc(b)+'"'+((scelti||[]).indexOf(b)>=0?' checked':'')+'> '+esc(b)+'</label>';}).join('');}
 function businessScelti(prefisso){return $$('[id^="'+prefisso+'"][data-b]').filter(function(e){return e.checked;}).map(function(e){return e.getAttribute('data-b');});}
 function utentiOpz(selezionato){var u=S.utenti.map(function(x){return [x.email||x.nome,x.nome+(x.email?' ('+x.email+')':'')];});if(selezionato&&!u.some(function(x){return x[0]===selezionato;}))u.push([selezionato,selezionato]);return opzioni(u,selezionato||'','Nessuno');}
-function pianiOpz(selezionato,conStandard){var p=[];if(conStandard)p.push(['','Standard dell’attività']);(S.piani.piani||[]).forEach(function(x){p.push([x,x==='nessuno'?'Nessun SLA (best effort)':'Piano '+x]);});return opzioni(p,selezionato||'',null);}
+function pianiDi(businesses){var v=[];(businesses||[]).forEach(function(b){((S.piani.per_business||{})[b]||[]).forEach(function(x){if(v.indexOf(x)<0)v.push(x);});});return v;}
+function tuttiPiani(){return pianiDi(Object.keys(S.piani.per_business||{}));}
+function pianiOpz(selezionato,conStandard,businesses){var p=[];if(conStandard)p.push(['','Standard dell\u2019attività']);pianiDi(businesses).forEach(function(x){p.push([x,x==='nessuno'?'Nessun SLA (best effort)':'Piano '+x]);});if(selezionato&&selezionato!=='nessuno'&&pianiDi(businesses).indexOf(selezionato)<0)p.push([selezionato,'Piano '+selezionato+' (tolto dalle impostazioni)']);return opzioni(p,selezionato||'',null);}
+function legaPianiPerAttivita(idBus,idPiano,conStandard){var agg=function(){var sp=$('#'+idPiano);if(!sp)return;sp.innerHTML=pianiOpz('',conStandard,[val(idBus)]);};$('#'+idBus).addEventListener('change',agg);}
 function nomePiano(p){return !p?'standard':p==='nessuno'?'nessun SLA':p;}
 
 // ---------------------------------------------------------------- grafici (cruscotto)
@@ -309,7 +312,7 @@ function filtriTicket(){
     sel('t-prio','Priorità',opzioni(f.priorita,t.priorita||'','Tutte',PR))+
     sel('t-fonte','Fonte',opzioni(f.fonti,t.fonte||'','Tutte'))+
     sel('t-ass','Assegnato a',opzioni(f.assegnati,t.assegnato||'','Tutti'))+
-    sel('t-piano','Piano SLA',opzioni([['standard','Standard'],['nessuno','Nessun SLA']].concat((S.piani.piani||[]).filter(function(x){return x!=='nessuno';}).map(function(x){return [x,'Piano '+x];})),t.piano||'','Tutti'))+
+    sel('t-piano','Piano SLA',opzioni([['standard','Standard'],['nessuno','Nessun SLA']].concat(tuttiPiani().filter(function(x){return x!=='nessuno';}).map(function(x){return [x,'Piano '+x];})),t.piano||'','Tutti'))+
     sel('t-ord','Ordine',opzioni([['scadenza','Per scadenza SLA'],['recenti','Più recenti'],['vecchi','Più vecchi'],['priorita','Per priorità']],t.ordine||'scadenza',null))+
     '</div>';
 }
@@ -340,8 +343,9 @@ function nuovoTicket(){
     '<label class="largo">Oggetto<input id="nt-ogg" maxlength="300"></label>'+
     '<label class="largo">Descrizione<textarea id="nt-txt" maxlength="8000"></textarea></label>'+
     inp('nt-nome','Cliente (nome)','')+inp('nt-mail','Cliente (email)','','email')+
-    inp('nt-cat','Categoria','')+sel('nt-piano','Piano SLA',pianiOpz('',true))+
+    inp('nt-cat','Categoria','')+sel('nt-piano','Piano SLA',pianiOpz('',true,[S.filtri.business||bus[0]]))+
     '</div><div class="azioni"><button class="p" id="nt-ok">Apri ticket</button><button data-chiudi>Annulla</button></div>');
+  legaPianiPerAttivita('nt-bus','nt-piano',true);
   $('#nt-ok').addEventListener('click',function(){
     var b={business:val('nt-bus'),oggetto:val('nt-ogg'),priorita:val('nt-prio')};
     if(!b.business||!b.oggetto){avviso('Servono attività e oggetto',true);return;}
@@ -361,7 +365,7 @@ function dettaglioTicket(ref){
       '<dt>Risolto</dt><dd>'+data(t.risolto_il)+(t.scade_risoluzione?' (entro '+data(t.scade_risoluzione)+')':'')+'</dd><dt>Piano SLA</dt><dd>'+esc(nomePiano(t.piano_sla))+'</dd></dl>';
     if(puo){
       h+='<h3>Gestione</h3><div class="modulo">'+sel('g-stato','Stato',opzioni(Object.keys(ST),t.stato,null,ST))+sel('g-prio','Priorità',opzioni(Object.keys(PR),t.priorita,null,PR))+
-        sel('g-ass','Assegnato a',utentiOpz(t.assegnato_a))+inp('g-cat','Categoria',t.categoria)+sel('g-piano','Piano SLA',pianiOpz(t.piano_sla,true))+'</div>'+
+        sel('g-ass','Assegnato a',utentiOpz(t.assegnato_a))+inp('g-cat','Categoria',t.categoria)+sel('g-piano','Piano SLA',pianiOpz(t.piano_sla,true,[t.business]))+'</div>'+
         '<div class="azioni"><button class="p" id="g-salva">Salva</button><button id="g-me">Assegna a me</button></div>';
     }
     h+='<h3>Conversazione</h3>';
@@ -433,7 +437,7 @@ function schedaCliente(id){
     var h='<h3 class="p">'+esc(c.nome)+'</h3><div>'+c.businesses.map(function(b){return chip(b,'acc');}).join('')+(c.stato?chip(c.stato):'')+chip('assistenza: '+nomePiano(c.piano_sla),c.piano_sla&&c.piano_sla!=='nessuno'?'ok':'')+'</div>';
     if(anag){
       h+='<h3>Anagrafica</h3><div class="modulo">'+inp('a-nome','Nome',c.nome)+inp('a-mail','Email',c.email,'email')+inp('a-tel','Telefono',c.telefono)+inp('a-piva','Partita IVA',c.partita_iva)+inp('a-cf','Codice fiscale',c.codice_fiscale)+
-        '<div class="largo"><div class="sotto">Attività</div>'+businessBox('a-b',c.businesses)+'</div>'+sel('a-piano','Piano di assistenza',pianiOpz(c.piano_sla,true))+'</div>'+
+        '<div class="largo"><div class="sotto">Attività</div>'+businessBox('a-b',c.businesses)+'</div>'+sel('a-piano','Piano di assistenza',pianiOpz(c.piano_sla,true,c.businesses))+'</div>'+
         '<div class="azioni"><button class="p" id="a-salva">Salva su ClickUp</button></div>';
     }else h+='<dl class="dl"><dt>Email</dt><dd>'+esc(c.email||'-')+'</dd><dt>Telefono</dt><dd>'+esc(c.telefono||'-')+'</dd><dt>P.IVA</dt><dd>'+esc(c.partita_iva||'-')+'</dd><dt>Cod. fiscale</dt><dd>'+esc(c.codice_fiscale||'-')+'</dd></dl>';
     h+='<dl class="dl"><dt>Cliente dal</dt><dd>'+giorno(c.creato_il)+'</dd></dl>';
@@ -595,15 +599,70 @@ function dettaglioDocumento(ref){
   }).catch(fallita);
 }
 
+// ---------------------------------------------------------------- impostazioni (solo owner)
+function schedaSla(b,i){
+  var p='s'+i+'-';
+  var h='<div class="sez" data-bus="'+esc(b.business)+'"><h2>'+esc(b.business)+'</h2>';
+  h+='<div class="modulo">'+lab('SLA standard proprio (senza piano)','<input id="'+p+'st" type="checkbox"'+(b.standard?' checked':'')+'>','ck')+
+    inp(p+'pr','Prima risposta (ore)',b.standard?b.standard.prima_risposta_ore:'','number','min="1" max="720"')+inp(p+'ri','Risoluzione (ore)',b.standard?b.standard.risoluzione_ore:'','number','min="1" max="2160"')+'</div>';
+  h+='<p class="sotto">Se non è spuntato vale il valore di partenza. La priorità accorcia o allunga lo SLA standard (urgente ×0,25, alta ×0,5, bassa ×2); i piani a pagamento no.</p>';
+  h+='<h3>Piani a pagamento</h3><div id="'+p+'piani">'+b.piani.map(function(x){return rigaPiano(x);}).join('')+'</div><div class="azioni"><button class="s" data-aggiungi="'+i+'">Aggiungi piano</button></div>';
+  h+='<div class="modulo">'+sel(p+'def','Piano dei ticket senza piano indicato','')+'</div>';
+  return h+'</div>';
+}
+function rigaPiano(x){
+  return '<div class="modulo" data-piano>'+inp('','Nome del piano (es. 48h)',x.piano,'text','maxlength="16" data-n="1"')+inp('','Prima risposta (ore)',x.prima_risposta_ore,'number','min="1" max="720" data-pr="1"')+inp('','Risoluzione (ore)',x.risoluzione_ore,'number','min="1" max="2160" data-ri="1"')+'<div><button class="s rosso" data-togli="1">Togli</button></div></div>';
+}
+function opzioniPianoPredefinito(i,corrente){
+  var nomi=$$('#s'+i+'-piani [data-n]').map(function(e){return e.value.trim();}).filter(Boolean);
+  var o=[['','SLA standard'],['nessuno','Nessun SLA (best effort)']].concat(nomi.map(function(n){return [n,'Piano '+n];}));
+  var sp=$('#s'+i+'-def');sp.innerHTML=opzioni(o,corrente,null);
+}
+function leggiSla(){
+  var out={predefinito:{prima_risposta_ore:Number(val('s-prima')),risoluzione_ore:Number(val('s-ris'))},business:[]};
+  $$('[data-bus]').forEach(function(box,i){
+    var p='s'+i+'-',st=spunta(p+'st');
+    out.business.push({business:box.getAttribute('data-bus'),
+      standard:st?{prima_risposta_ore:Number(val(p+'pr')),risoluzione_ore:Number(val(p+'ri'))}:null,
+      piano_predefinito:val(p+'def')||null,
+      piani:$$('[data-piano]',box).map(function(r){return {piano:$('[data-n]',r).value.trim(),prima_risposta_ore:Number($('[data-pr]',r).value),risoluzione_ore:Number($('[data-ri]',r).value)};}).filter(function(x){return x.piano;})});
+  });
+  return out;
+}
+function impostazioni(){
+  return api('/impostazioni/sla').then(function(d){
+    var h='<div class="titolo"><h2>Impostazioni</h2></div><main><div class="sez"><h2>SLA: tempi di assistenza per attività</h2>'+
+      '<p class="sotto">Ore di calendario dall\u2019apertura del ticket. Le modifiche valgono subito per i ticket nuovi; i ticket già aperti non cambiano (per ricalcolarne uno cambia il suo piano dal ticket). I piani tolti restano nello storico e si possono rimettere.</p>'+
+      '<div class="modulo">'+inp('s-prima','Valore di partenza: prima risposta (ore)',d.predefinito.prima_risposta_ore,'number','min="1" max="720"')+inp('s-ris','Valore di partenza: risoluzione (ore)',d.predefinito.risoluzione_ore,'number','min="1" max="2160"')+'</div></div>';
+    h+=d.business.map(schedaSla).join('');
+    h+='<div class="azioni"><button class="p" id="s-salva">Salva tutte le impostazioni SLA</button></div></main>';
+    $('#corpo-vista').innerHTML=h;
+    d.business.forEach(function(b,i){opzioniPianoPredefinito(i,b.piano_predefinito||'');});
+    var aggancia=function(){
+      $$('[data-bus]').forEach(function(box,i){
+        $$('[data-n]',box).forEach(function(e){e.oninput=function(){opzioniPianoPredefinito(i,val('s'+i+'-def'));};});
+        $$('[data-togli]',box).forEach(function(b){b.onclick=function(){var r=b.parentNode.parentNode;r.parentNode.removeChild(r);opzioniPianoPredefinito(i,val('s'+i+'-def'));};});
+      });
+    };
+    aggancia();
+    $$('[data-aggiungi]').forEach(function(b){b.addEventListener('click',function(){var i=Number(b.getAttribute('data-aggiungi'));var box=$('#s'+i+'-piani');var d2=document.createElement('div');d2.innerHTML=rigaPiano({piano:'',prima_risposta_ore:24,risoluzione_ore:72});box.appendChild(d2.firstChild);aggancia();});});
+    $('#s-salva').addEventListener('click',function(){
+      chiama('PUT','/impostazioni/sla',leggiSla()).then(function(){avviso('Impostazioni SLA salvate');return api('/piani-sla');}).then(function(p){S.piani=p;carica();}).catch(fallita);
+    });
+  });
+}
+
 // ---------------------------------------------------------------- navigazione
-var VOCI=[['cruscotto','','Cruscotto'],['ticket','','Ticket'],['crm','clienti','CRM'],['fatture','','Fatturazione']];
+var VOCI=[['cruscotto','','Cruscotto'],['ticket','','Ticket'],['crm','clienti','CRM'],['fatture','','Fatturazione'],['impostazioni','sla','Impostazioni']];
 var SOTTO=[['clienti','Clienti'],['trattative','Trattative'],['dafare','Da fare'],['duplicati','Duplicati']];
+var SOTTO_IMP=[['sla','SLA']];
 function vai(sez,sub){location.hash='#/'+sez+(sub?'/'+sub:'');}
-function leggiHash(){var p=location.hash.replace(/^#\/?/,'').split('/');S.sez=p[0]||'cruscotto';S.sub=p[1]||(S.sez==='crm'?'clienti':'');if(S.sez==='fatture'&&!permesso('fatture'))S.sez='cruscotto';}
+function leggiHash(){var p=location.hash.replace(/^#\/?/,'').split('/');S.sez=p[0]||'cruscotto';S.sub=p[1]||(S.sez==='crm'?'clienti':'');if(S.sez==='fatture'&&!permesso('fatture'))S.sez='cruscotto';if(S.sez==='impostazioni'&&!permesso('impostazioni'))S.sez='cruscotto';if(S.sez==='impostazioni'&&!S.sub)S.sub='sla';}
 function menu(){
   var h='<h1>Gestione</h1>';
-  VOCI.forEach(function(v){if(v[0]==='fatture'&&!permesso('fatture'))return;h+='<button class="m'+(S.sez===v[0]?' on':'')+'" data-m="'+v[0]+'" data-s="'+v[1]+'">'+esc(v[2])+'</button>';
-    if(v[0]==='crm'&&S.sez==='crm')SOTTO.forEach(function(s){h+='<button class="m sm'+(S.sub===s[0]?' on':'')+'" data-m="crm" data-s="'+s[0]+'">'+esc(s[1])+'</button>';});});
+  VOCI.forEach(function(v){if(v[0]==='fatture'&&!permesso('fatture'))return;if(v[0]==='impostazioni'&&!permesso('impostazioni'))return;h+='<button class="m'+(S.sez===v[0]?' on':'')+'" data-m="'+v[0]+'" data-s="'+v[1]+'">'+esc(v[2])+'</button>';
+    if(v[0]==='crm'&&S.sez==='crm')SOTTO.forEach(function(s){h+='<button class="m sm'+(S.sub===s[0]?' on':'')+'" data-m="crm" data-s="'+s[0]+'">'+esc(s[1])+'</button>';});
+    if(v[0]==='impostazioni'&&S.sez==='impostazioni')SOTTO_IMP.forEach(function(s){h+='<button class="m sm'+(S.sub===s[0]?' on':'')+'" data-m="impostazioni" data-s="'+s[0]+'">'+esc(s[1])+'</button>';});});
   h+='<span class="sp"></span><div class="ut">'+esc(S.me.nome)+'<br>'+esc(S.me.ruoli.join(', '))+'</div><form method="post" action="/dashboard/logout"><button type="submit" class="m">Esci</button></form>';
   $('#lato').innerHTML=h;
   $$('#lato [data-m]').forEach(function(b){b.addEventListener('click',function(){S.pag={ticket:0,clienti:0,fatture:0};chiudiPannello();vai(b.getAttribute('data-m'),b.getAttribute('data-s'));});});
@@ -615,7 +674,7 @@ function sincro(righe){
 function carica(){
   leggiHash();menu();
   $('#corpo-vista').innerHTML='<div class="vuoto">Caricamento…</div>';
-  var f=S.sez==='ticket'?ticket:S.sez==='fatture'?fatture:S.sez==='crm'?(S.sub==='trattative'?trattative:S.sub==='dafare'?dafare:S.sub==='duplicati'?duplicati:clienti):cruscotto;
+  var f=S.sez==='ticket'?ticket:S.sez==='fatture'?fatture:S.sez==='impostazioni'?impostazioni:S.sez==='crm'?(S.sub==='trattative'?trattative:S.sub==='dafare'?dafare:S.sub==='duplicati'?duplicati:clienti):cruscotto;
   f().catch(function(e){$('#corpo-vista').innerHTML='<div class="err">'+esc(e.message||e)+'</div>';});
 }
 function avvia(){

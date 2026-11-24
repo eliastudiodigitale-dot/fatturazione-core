@@ -15,10 +15,18 @@ export const cfgTest = (extra: Record<string, string> = {}): Config => caricaCon
 
 export const admin = new pg.Pool({ host: '127.0.0.1', port: PORTA, user: 'postgres', password: 'test', database: 'fatturazione', max: 2 });
 
+/** Regole SLA di partenza dei test: 24/72 ore ovunque, heyciar.it 48/72 più i piani 48h, 3g, 5g, 7g (nessun piano predefinito). */
+export async function impostaSlaTest() {
+  await admin.query('TRUNCATE sla_piani, sla_business');
+  await admin.query(`INSERT INTO sla_business (business, prima_risposta_ore, risoluzione_ore, piano_predefinito) VALUES ('*', 24, 72, NULL), ('heyciar.it', 48, 72, NULL)`);
+  await admin.query(`INSERT INTO sla_piani (business, piano, prima_risposta_ore, risoluzione_ore) VALUES ('heyciar.it','48h',24,48), ('heyciar.it','3g',36,72), ('heyciar.it','5g',60,120), ('heyciar.it','7g',84,168)`);
+}
+
 export async function svuota() {
   await admin.query(
     'TRUNCATE storico, documenti, eventi_ricevuti, contatori, ticket_messaggi, ticket_eventi, ticket, crm_clienti, crm_sync, crm_contatti, crm_note, crm_attivita, crm_opportunita, crm_viste, utenti_dashboard RESTART IDENTITY CASCADE',
   );
+  await impostaSlaTest();
 }
 
 export function poolApp() {
@@ -139,7 +147,6 @@ export class ClickUpFinto implements ClickUpApi {
   crm = new Map<string, TaskCrm[]>();
   /** Modifiche "fatte in ClickUp" su task create dal servizio (stato, assegnati, priorità...). */
   modifiche = new Map<string, Partial<TaskCrm>>();
-  commenti: { taskId: string; testo: string }[] = [];
   ultimoFiltroData: Date | undefined;
   aggiungiCrm(listId: string, t: Partial<TaskCrm> & { id: string; nome: string }): TaskCrm {
     const completa: TaskCrm = { stato: { nome: 'to do', tipo: 'open' }, priorita: null, creata: new Date(), modificata: new Date(), chiusa: null, assegnati: [], tag: [], campi: {}, ...t };
@@ -156,7 +163,7 @@ export class ClickUpFinto implements ClickUpApi {
         id,
         nome: v.t!.nome,
         stato: { nome: 'to do', tipo: 'open' },
-        priorita: v.t!.priorita ?? null,
+        priorita: null,
         creata: new Date(),
         modificata: new Date(),
         chiusa: null,
@@ -167,10 +174,6 @@ export class ClickUpFinto implements ClickUpApi {
       }));
     const tutte = [...(this.crm.get(listId) ?? []), ...create];
     return tutte.filter((t) => !o.modificateDopo || (t.modificata ?? new Date(0)) > o.modificateDopo);
-  }
-  async commenta(taskId: string, testo: string): Promise<void> {
-    this.check();
-    this.commenti.push({ taskId, testo });
   }
   /** Scritture fatte dal portale sulle schede cliente. */
   aggiornamenti: { taskId: string; mod: { nome?: string; stato?: string } }[] = [];

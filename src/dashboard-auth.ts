@@ -69,12 +69,14 @@ export interface Permessi {
   fatture: boolean;
   /** Lanciare la sincronizzazione con ClickUp e con i backend. */
   sync: boolean;
+  /** Sezione Impostazioni (SLA e altre regole che cambiano nel tempo). */
+  impostazioni: boolean;
 }
 export function permessiDiSessione(s: Sessione): Permessi {
   const o = s.ruoli.includes('owner');
   const am = s.ruoli.includes('amministrazione');
   const as = s.ruoli.includes('assistenza');
-  return { ticketScrive: o || as, crmScrive: o || am || as, crmAnagrafica: o || am, fatture: o || am, sync: o };
+  return { ticketScrive: o || as, crmScrive: o || am || as, crmAnagrafica: o || am, fatture: o || am, sync: o, impostazioni: o };
 }
 
 export function ambitoDiSessione(s: Sessione): Ambito {

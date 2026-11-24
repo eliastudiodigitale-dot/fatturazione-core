@@ -31,11 +31,11 @@ CREATE INDEX crm_clienti_piva ON crm_clienti (partita_iva) WHERE partita_iva IS 
 CREATE INDEX crm_clienti_businesses ON crm_clienti USING gin (businesses);
 
 -- Ticket. `ref` è la chiave di idempotenza: <fonte>|<id esterno> per i ticket che arrivano dalle fonti,
--- clickup|<id task> per quelli aperti direttamente in ClickUp.
+-- dashboard|<uuid> per quelli aperti dal portale su un business senza backend.
 CREATE TABLE ticket (
   id                   bigserial PRIMARY KEY,
   ref                  text NOT NULL UNIQUE,
-  fonte                text NOT NULL,           -- heyciar, serrandasu, reti, dashboard (aperto dal portale), clickup (storico), ...
+  fonte                text NOT NULL,           -- heyciar, serrandasu, reti, dashboard (aperto dal portale), ...
   origine              text NOT NULL DEFAULT 'locale' CHECK (origine IN ('locale','remoto')),  -- dove vive il ticket
   id_remoto            text,                    -- id del ticket nel backend del business (origine = remoto)
   piano_sla            text,                    -- piano SLA applicato (#46): 48h, 3g, 5g, 7g; 'nessuno' = senza SLA (best effort); NULL = SLA standard dell'attività
@@ -55,15 +55,13 @@ CREATE TABLE ticket (
   risolto_il           timestamptz,
   scade_prima_risposta timestamptz,
   scade_risoluzione    timestamptz,
-  clickup_task_id      text UNIQUE,
-  sync_il              timestamptz,
+  sync_il              timestamptz,            -- ultima lettura dal backend del business (ticket remoti)
   aggiornato_il        timestamptz NOT NULL DEFAULT now(),
   dati_fonte           jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (pg_column_size(dati_fonte) <= 4096)
 );
 CREATE INDEX ticket_business_stato ON ticket (business, stato);
 CREATE INDEX ticket_aperto_il ON ticket (aperto_il);
 CREATE INDEX ticket_cliente ON ticket (cliente_task_id) WHERE cliente_task_id IS NOT NULL;
-CREATE INDEX ticket_da_inviare ON ticket (id) WHERE clickup_task_id IS NULL AND origine = 'locale';
 CREATE INDEX ticket_assegnato ON ticket (lower(assegnato_a)) WHERE assegnato_a IS NOT NULL;
 
 -- Cronologia leggera del ticket (apertura, cambi di stato, risposte): niente testi.
@@ -85,11 +83,9 @@ CREATE TABLE ticket_messaggi (
   da        text NOT NULL CHECK (da IN ('cliente','staff')),
   autore    text,
   interno   boolean NOT NULL DEFAULT false,
-  testo     text CHECK (length(testo) <= 8000),
-  inviato_il timestamptz
+  testo     text CHECK (length(testo) <= 8000)
 );
 CREATE INDEX ticket_messaggi_ticket ON ticket_messaggi (ticket_id, id);
-CREATE INDEX ticket_messaggi_da_inviare ON ticket_messaggi (id) WHERE inviato_il IS NULL AND NOT interno;
 
 -- Chi ha fatto accesso al portale: serve per proporre gli assegnatari dei ticket e delle attività.
 CREATE TABLE utenti_dashboard (
@@ -184,11 +180,38 @@ CREATE TABLE crm_sync (
   dettaglio    jsonb
 );
 
+-- Impostazioni SLA (#46), modificabili dal portale (Impostazioni > SLA) perché cambiano nel tempo e sono diverse per attività.
+-- business '*' = valori di partenza per le attività senza regole proprie. Nessuna cancellazione: un piano tolto resta con attivo = false.
+CREATE TABLE sla_business (
+  business         text PRIMARY KEY CHECK (business = '*' OR business ~ '^[a-z0-9][a-z0-9._-]{0,63}$'),
+  prima_risposta_ore int CHECK (prima_risposta_ore BETWEEN 1 AND 720),    -- SLA standard a priorità normale (NULL = usa '*')
+  risoluzione_ore  int CHECK (risoluzione_ore BETWEEN 1 AND 2160),
+  piano_predefinito text,                                                  -- 'nessuno' o un piano attivo dell'attività; NULL = SLA standard
+  aggiornato_il    timestamptz NOT NULL DEFAULT now(),
+  aggiornato_da    text
+);
+CREATE TABLE sla_piani (
+  business         text NOT NULL REFERENCES sla_business(business),
+  piano            text NOT NULL CHECK (piano ~ '^[a-z0-9][a-z0-9_-]{0,15}$' AND piano <> 'nessuno' AND piano <> 'standard'),
+  prima_risposta_ore int NOT NULL CHECK (prima_risposta_ore BETWEEN 1 AND 720),
+  risoluzione_ore  int NOT NULL CHECK (risoluzione_ore BETWEEN 1 AND 2160),
+  attivo           boolean NOT NULL DEFAULT true,
+  PRIMARY KEY (business, piano)
+);
+-- Valori di partenza. heyciar.it (confermati da Elia, #46): livelli 48h, 3, 5 e 7 giorni = termine di RISOLUZIONE; prima risposta
+-- a metà termine [DA CONFERMARE]; chi non ha un piano a pagamento è senza SLA. Le altre attività: 24 h / 72 h finché non si cambia dal portale.
+INSERT INTO sla_business (business, prima_risposta_ore, risoluzione_ore, piano_predefinito, aggiornato_da) VALUES
+  ('*', 24, 72, NULL, 'migrazione 005'),
+  ('heyciar.it', NULL, NULL, 'nessuno', 'migrazione 005');
+INSERT INTO sla_piani (business, piano, prima_risposta_ore, risoluzione_ore) VALUES
+  ('heyciar.it', '48h', 24, 48), ('heyciar.it', '3g', 36, 72), ('heyciar.it', '5g', 60, 120), ('heyciar.it', '7g', 84, 168);
+
 -- Permessi per il ruolo dell'app: mai DELETE, mai DDL.
 GRANT SELECT, INSERT, UPDATE ON crm_clienti TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON ticket TO fatturazione_app;
 GRANT SELECT, INSERT ON ticket_eventi TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON ticket_messaggi TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON crm_sync TO fatturazione_app;
+GRANT SELECT, INSERT, UPDATE ON sla_business, sla_piani TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON utenti_dashboard, crm_contatti, crm_note, crm_attivita, crm_opportunita, crm_viste TO fatturazione_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fatturazione_app;

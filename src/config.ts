@@ -26,7 +26,7 @@ export interface Config {
   };
   worker: { interniSec: number; esterniSec: number; attesaClickupMin: number };
   /** Ticket in arrivo dalle fonti (un token per fonte, legato a un'attività). Senza fonti non si accettano ticket esterni. */
-  ticket: { fonti: Record<string, FonteTicket>; sla: SlaConfig; /** Ogni quanti minuti si rileggono i ticket dai backend dei business. */ syncMin: number };
+  ticket: { fonti: Record<string, FonteTicket>; /** Ogni quanti minuti si rileggono i ticket dai backend dei business. */ syncMin: number };
   /** Sincronizzazione CRM e ticket con ClickUp (decisione #45): attiva solo con ClickUp configurato e almeno una lista. */
   crm?: CrmConfig;
   /** Dashboard con login Keycloak: attiva solo con tutte le variabili impostate. */
@@ -41,15 +41,22 @@ export interface FonteTicket {
   /** Backend ticket del business (#46): se c'è, i ticket vivono lì e il portale li richiama via API (contratto in docs/ticket-backend-api.md). */
   backend?: { url: string; token: string };
 }
+/**
+ * Regole SLA lette dal DB (tabelle sla_business e sla_piani), modificabili dal portale (Impostazioni > SLA).
+ * Le ore sono di calendario, dall'apertura del ticket.
+ */
 export interface SlaConfig {
-  /** Ore per la prima risposta e per la risoluzione di un ticket a priorità normale; le altre priorità le scalano. */
-  primaRispostaOre: number;
-  risoluzioneOre: number;
-  perBusiness: Record<string, { primaRispostaOre: number; risoluzioneOre: number }>;
-  /** Piani di assistenza a pagamento (#46): nome → ore per prima risposta e risoluzione. Termini fissi, non scalati dalla priorità. */
+  /** Valori di partenza (riga '*') per le attività senza regole proprie: priorità normale, le altre priorità le scalano. */
+  predefinito: { primaRispostaOre: number; risoluzioneOre: number };
+  business: Record<string, SlaBusiness>;
+}
+export interface SlaBusiness {
+  /** SLA standard dell'attività (priorità normale); assente = vale `predefinito`. */
+  standard?: { primaRispostaOre: number; risoluzioneOre: number };
+  /** Piano di partenza dei ticket di questa attività ("nessuno" = senza SLA); assente = SLA standard. */
+  pianoPredefinito?: string;
+  /** Piani a pagamento attivi (es. 48h, 3g): termini fissi, la priorità non li cambia. */
   piani: Record<string, { primaRispostaOre: number; risoluzioneOre: number }>;
-  /** Piano di partenza per attività quando il ticket non ne indica uno ("nessuno" = senza SLA, best effort). */
-  pianoPredefinito: Record<string, string>;
 }
 export interface CampiClienti {
   email?: string;
@@ -58,23 +65,10 @@ export interface CampiClienti {
   telefono?: string;
   business?: string;
 }
-export interface CampiTicket {
-  /** Campo testo con la chiave del ticket (ref): lega la task ClickUp al ticket nel DB. */
-  ref?: string;
-  business?: string;
-  fonte?: string;
-  categoria?: string;
-  /** Relazione verso la scheda in Clienti. */
-  cliente?: string;
-  email?: string;
-}
 export interface CrmConfig {
   clientiListId?: string;
-  ticketListId?: string;
   campiClienti: CampiClienti;
-  campiTicket: CampiTicket;
   syncClientiMin: number;
-  syncTicketMin: number;
   /** Se true il servizio crea in ClickUp la scheda dei clienti pagati via Stripe/GoCardless che mancano (#42). Default spento. */
   creaClienti: boolean;
   businessPredefinito?: string;
@@ -171,7 +165,7 @@ export function caricaConfig(env: Env = process.env): Config {
       // I documenti da n8n hanno la task creata dal workflow (dopo l'approvazione su Telegram): il servizio aspetta.
       attesaClickupMin: int(env, 'WORKER_ATTESA_CLICKUP_MIN', 45, 0, 1440),
     },
-    ticket: { fonti: {}, sla: slaDaEnv(env), syncMin: int(env, 'TICKET_SYNC_MIN', 5, 1, 1440) },
+    ticket: { fonti: {}, syncMin: int(env, 'TICKET_SYNC_MIN', 5, 1, 1440) },
     riconciliazione: {
       oraRoma: int(env, 'RICONCILIAZIONE_ORA', 6, 0, 23),
       riservatoMaxOre: int(env, 'RISERVATO_MAX_ORE', 24, 1, 720),
@@ -266,13 +260,12 @@ export function caricaConfig(env: Env = process.env): Config {
       },
     };
   }
-  // CRM e ticket in ClickUp (#45): servono il token ClickUp e almeno una lista. Gli ID dei campi sono tutti facoltativi.
+  // CRM su ClickUp (#42, #45): clienti in ClickUp. Servono il token ClickUp e la lista Clienti; gli ID dei campi sono facoltativi.
+  // I ticket NON stanno in ClickUp (#47): vivono nei backend dei business o nel DB del servizio.
   const listaClienti = opt(env, 'CLICKUP_LIST_ID_CLIENTI');
-  const listaTicket = opt(env, 'CLICKUP_LIST_ID_TICKET');
-  if (cfg.clickup && (listaClienti || listaTicket)) {
+  if (cfg.clickup && listaClienti) {
     cfg.crm = {
       clientiListId: listaClienti,
-      ticketListId: listaTicket,
       campiClienti: {
         email: opt(env, 'CLICKUP_CLIENTI_CAMPO_EMAIL_ID'),
         partitaIva: opt(env, 'CLICKUP_CLIENTI_CAMPO_PIVA_ID'),
@@ -280,22 +273,11 @@ export function caricaConfig(env: Env = process.env): Config {
         telefono: opt(env, 'CLICKUP_CLIENTI_CAMPO_TELEFONO_ID'),
         business: opt(env, 'CLICKUP_CLIENTI_CAMPO_BUSINESS_ID'),
       },
-      campiTicket: {
-        ref: opt(env, 'CLICKUP_TICKET_CAMPO_REF_ID'),
-        business: opt(env, 'CLICKUP_TICKET_CAMPO_BUSINESS_ID'),
-        fonte: opt(env, 'CLICKUP_TICKET_CAMPO_FONTE_ID'),
-        categoria: opt(env, 'CLICKUP_TICKET_CAMPO_CATEGORIA_ID'),
-        cliente: opt(env, 'CLICKUP_TICKET_CAMPO_CLIENTE_ID'),
-        email: opt(env, 'CLICKUP_TICKET_CAMPO_EMAIL_ID'),
-      },
       syncClientiMin: int(env, 'CRM_SYNC_CLIENTI_MIN', 60, 5, 1440),
-      syncTicketMin: int(env, 'CRM_SYNC_TICKET_MIN', 10, 2, 1440),
       creaClienti: opt(env, 'CRM_CREA_CLIENTI') === 'true',
       businessPredefinito: opt(env, 'CRM_BUSINESS_PREDEFINITO'),
       alias: aliasDaEnv(env),
     };
-    // Senza il campo ref non si può legare un ticket alla sua task: meglio fermarsi che creare task doppie.
-    if (listaTicket && !cfg.crm.campiTicket.ref) throw new Error('CLICKUP_LIST_ID_TICKET richiede CLICKUP_TICKET_CAMPO_REF_ID');
   }
 
   // Dashboard: tutte le variabili o nessuna. I segreti arrivano solo dall'ambiente e non vengono mai mostrati.
@@ -351,38 +333,6 @@ function urlBackend(v: string, nome: string): string {
   return v.replace(/\/+$/, '');
 }
 
-const PIANI_PREDEFINITI = '48h=24/48,3g=36/72,5g=60/120,7g=84/168';
-
-/**
- * TICKET_SLA_ORE="heyciar.it=48/72,serrandasu.it=24/72" (prima risposta/risoluzione); predefiniti 24/72 ore a priorità normale.
- * TICKET_SLA_PIANI="48h=24/48,3g=36/72,..." piani a pagamento (#46); TICKET_PIANO_PREDEFINITO="heyciar.it=nessuno".
- */
-function slaDaEnv(env: Env): SlaConfig {
-  const sla: SlaConfig = {
-    primaRispostaOre: int(env, 'TICKET_SLA_PRIMA_RISPOSTA_ORE', 24, 1, 720),
-    risoluzioneOre: int(env, 'TICKET_SLA_RISOLUZIONE_ORE', 72, 1, 2160),
-    perBusiness: {},
-    piani: {},
-    pianoPredefinito: {},
-  };
-  for (const coppia of (opt(env, 'TICKET_SLA_PIANI') ?? PIANI_PREDEFINITI).split(',').map((x) => x.trim()).filter(Boolean)) {
-    const m = /^([a-z0-9][a-z0-9_-]{0,15})=(\d{1,3})\/(\d{1,4})$/.exec(coppia);
-    if (!m || m[1] === 'nessuno') throw new Error('valore non valido: TICKET_SLA_PIANI (formato piano=ore_prima_risposta/ore_risoluzione)');
-    sla.piani[m[1]!] = { primaRispostaOre: Number(m[2]), risoluzioneOre: Number(m[3]) };
-  }
-  for (const coppia of (opt(env, 'TICKET_PIANO_PREDEFINITO') ?? '').split(',').map((x) => x.trim()).filter(Boolean)) {
-    const m = /^([a-z0-9][a-z0-9._-]{0,63})=([a-z0-9_-]{1,16})$/.exec(coppia);
-    if (!m || (m[2] !== 'nessuno' && !sla.piani[m[2]!])) throw new Error('valore non valido: TICKET_PIANO_PREDEFINITO (formato attività=piano, il piano deve esistere in TICKET_SLA_PIANI)');
-    sla.pianoPredefinito[m[1]!] = m[2]!;
-  }
-  for (const coppia of (opt(env, 'TICKET_SLA_ORE') ?? '').split(',').map((x) => x.trim()).filter(Boolean)) {
-    const m = /^([a-z0-9][a-z0-9._-]{0,63})=(\d{1,3})\/(\d{1,4})$/.exec(coppia);
-    if (!m) throw new Error('valore non valido: TICKET_SLA_ORE (formato attività=ore_prima_risposta/ore_risoluzione)');
-    sla.perBusiness[m[1]!] = { primaRispostaOre: Number(m[2]), risoluzioneOre: Number(m[3]) };
-  }
-  return sla;
-}
-
 /** Elenco di ciò che è attivo, senza valori: va bene per i log. */
 export function riassuntoConfig(c: Config): Record<string, unknown> {
   return {
@@ -394,7 +344,7 @@ export function riassuntoConfig(c: Config): Record<string, unknown> {
     stripeLivemode: c.stripe?.livemode ?? null,
     fonteTicket: Object.keys(c.ticket.fonti),
     backendTicket: Object.entries(c.ticket.fonti).filter(([, f]) => f.backend).map(([k]) => k),
-    crm: c.crm ? { clienti: Boolean(c.crm.clientiListId), ticket: Boolean(c.crm.ticketListId), creaClienti: c.crm.creaClienti } : false,
+    crm: c.crm ? { clienti: Boolean(c.crm.clientiListId), creaClienti: c.crm.creaClienti } : false,
     dashboard: Boolean(c.dashboard),
     clickup: Boolean(c.clickup),
     telegram: Boolean(c.telegram),
