@@ -9,4 +9,4 @@ Dal repo (`package.json`, `Dockerfile`, `tsconfig.json`, `vitest.config.ts`):
 - Runtime di produzione: k3s sul VPS, namespace `platform`, immagine importata senza registry (#23).
 - Servizi esterni: ClickUp (copia dei documenti, limite 100/min condiviso, il servizio ne usa 40), Stripe (organizzazione, un account per attività, #37), GoCardless (trigger `paid_out`, #26), Telegram (notifiche, #21), Backblaze B2 (copia offsite cifrata, #22), n8n (flussi di proforma e fatture, token Bearer, #20).
 - Fase 2: provider SDI da scegliere (ricerca dedicata, #25). Oggi la fattura elettronica si emette con programma esterno (#36).
-- Fase 3: dashboard Next.js e Keycloak [DA VERIFICARE: URL].
+- Fase 3: portale `/dashboard` nel servizio stesso (nessun Next.js nel `package.json`), login Keycloak [DA VERIFICARE: URL]. La decisione #11 nominava una dashboard Next.js: da allineare [DA VERIFICARE con Elia].

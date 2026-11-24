@@ -5,9 +5,11 @@ Dal repo (Node 24, `engines` in package.json):
 - `npm run build` — compila in `dist/` (tsc)
 - `npm run typecheck` — controllo tipi senza emissione
 - `npm run typecheck:test` — controllo tipi dei test
-- `npm test` — vitest (81 test a 0.1.4; richiedono Postgres 16 di prova in Docker locale, vedi `tests/setup/globalSetup.ts`)
+- `npm test` — vitest (197 test al 2026-11-24; richiedono Postgres 16 di prova in Docker locale, vedi `tests/setup/globalSetup.ts`)
 - `npm run dev` — avvio con tsx in watch su `src/index.ts`
 - `npm start` — avvio da `dist/index.js`
+- `npm run locale:db` — solo il Postgres di prova in Docker per il portale locale (porta 55433, `scripts/locale/avvia-db.sh`)
+- `npm run locale` — portale locale su http://localhost:8081/dashboard, senza Keycloak, con finti backend ticket e ClickUp (solo localhost, `scripts/locale/portale-locale.ts`)
 
 Script operativi (lanciati dal Mac da Elia; la lista completa è nei file):
 
