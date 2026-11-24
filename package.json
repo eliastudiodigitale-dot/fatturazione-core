@@ -12,7 +12,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "typecheck:test": "tsc --noEmit --module nodenext --moduleResolution nodenext --strict --skipLibCheck --target es2023 tests/*.ts tests/setup/*.ts"
+    "typecheck:test": "tsc --noEmit --module nodenext --moduleResolution nodenext --strict --skipLibCheck --target es2023 tests/*.ts tests/setup/*.ts",
+    "locale:db": "bash scripts/locale/avvia-db.sh",
+    "locale": "bash scripts/locale/avvia-db.sh && tsx scripts/locale/portale-locale.ts"
   },
   "dependencies": {
     "fastify": "5.12.8",
