@@ -2,14 +2,21 @@
 
 Stato: scritto e testato in locale su Node 24 (suite completa e prova della pagina in un DOM simulato), **non ancora rilasciato**. Migrazione 005 da applicare, Keycloak da configurare, backend dei business da collegare. Il portale non è mai stato provato contro ClickUp, Keycloak o un backend ticket veri [NON VERIFICATO].
 
+## Provarlo in locale (Mac, Node 24, Docker)
+```
+cd /Users/elia/offline/REPO-locali/fatturazione-core && source ~/.nvm/nvm.sh && nvm use && npm run locale
+```
+Apre un Postgres 16 locale in Docker (`fatturazione-locale-pg`, porta 55433, dati in un volume), applica le migrazioni 001-005, inserisce dati di esempio la prima volta e avvia il servizio vero con un finto backend heyciar e un finto ClickUp. Poi apri **http://localhost:8081/dashboard** (nessun login: la sessione la mette lo script, solo su localhost). Altro ruolo: `npm run locale -- assistenza` (o `amministrazione`). Ctrl+C per fermare. Ripartire da zero: `docker rm -f fatturazione-locale-pg && docker volume rm fatturazione-locale-dati`. Il DB dei test è un altro container e non si tocca.
+
 ## Come funziona
 Il portale (`/dashboard`) è il centro operativo: menu a sezioni, ognuna legge e scrive. Oggi sono quattro, altre si aggiungono.
 
 | Sezione | Cosa si fa | Dove stanno i dati |
 |---|---|---|
 | **Cruscotto** | KPI, "da fare adesso" (ticket da prendere, SLA scaduti, attività scadute), confronto tra attività | copie locali + documenti |
-| **Ticket** | elenco con filtri e viste salvate, apertura, assegnazione, stato, priorità, risposte e note interne, piano SLA, export CSV | nel **backend di ogni business**, richiamato via API (#47); i business senza backend: nel servizio |
+| **Ticket** | elenco con filtri e viste salvate, apertura, assegnazione, stato, priorità, risposte e note interne, piano SLA, export CSV | nel **backend di ogni business**, richiamato via API (#47); i business senza backend: nel **DB Postgres** del servizio |
 | **CRM** | Clienti (scheda completa), Trattative (pipeline), Da fare (attività e promemoria), Duplicati | clienti in **ClickUp** (#42); contatti, note, attività, trattative e viste nel DB del portale |
+| **Impostazioni** (solo owner) | SLA per attività: valori di partenza, SLA standard, piani a pagamento | DB (`sla_business`, `sla_piani`) |
 | **Fatturazione** | documenti in **sola lettura**, filtri (tipo, stato, origine, anno, date, importo, cliente, testo), somma sulla selezione, dettaglio con righe e storico, export CSV | DB del servizio (numerazione ufficiale, #1) |
 
 Chi lavora lì è un utente Keycloak: ogni accesso lo rende assegnabile ai ticket e alle attività.
@@ -19,21 +26,19 @@ Chi lavora lì è un utente Keycloak: ogni accesso lo rende assegnabile ai ticke
 - Modifiche e risposte dal portale vanno **prima al backend, poi alla copia**: se il backend non risponde vedi l'errore e non cambia nulla.
 - Un business senza backend (`TICKET_BACKEND_URL_<FONTE>` assente) tiene i ticket nel servizio: li apre il portale o la fonte con `POST /v1/ticket`, con conversazione nel DB.
 - Le fonti possono anche avvisare subito con `POST /v1/ticket` (token della fonte): idempotente per `<fonte>|<id_esterno>`, il token fissa fonte e attività, ticket urgente = avviso Telegram. `POST /v1/ticket/<ref>/messaggi` registra un messaggio (cliente o staff); se il cliente scrive su un ticket chiuso risponde `da_riaprire: true` e arriva un avviso.
-- Il ticket aperto a mano in ClickUp non esiste più come flusso (#47). Restano nel codice, spente, la lista ClickUp dei ticket e la sua sincronizzazione: con `CLICKUP_LIST_ID_TICKET` vuota non fanno nulla.
+- Nessun ticket in ClickUp (#47): la lista ticket e la sua sincronizzazione sono state tolte dal codice. ClickUp resta solo per i **clienti**.
 
-## SLA a piani (#46)
-Ore di calendario, dall'apertura. Il piano appartiene al **cliente**, non solo all'attività.
-| Piano | Prima risposta | Risoluzione |
-|---|---|---|
-| `48h` (il più alto) | 24 h | 48 h |
-| `3g` | 36 h | 72 h |
-| `5g` | 60 h | 120 h |
-| `7g` | 84 h | 168 h |
-| `nessuno` | nessuna scadenza (best effort) | nessuna |
-[DA CONFERMARE] Ho letto "entro 48h, 3, 5, 7 giorni" come termine di **risoluzione**, con la prima risposta a metà termine. Si cambia in `TICKET_SLA_PIANI`.
-- Il piano vale fisso: la priorità non lo accorcia.
-- Quale piano prende un ticket: quello indicato dal backend o dalla fonte (`piano_sla`), altrimenti quello del cliente (si imposta nella scheda cliente), altrimenti il predefinito dell'attività (`TICKET_PIANO_PREDEFINITO`: `heyciar.it=nessuno`), altrimenti lo SLA standard dell'attività scalato dalla priorità (24/72 ore; `TICKET_SLA_ORE` per cambiarlo).
-- Si può cambiare il piano di un ticket dal portale: le scadenze si ricalcolano dall'apertura. I ticket senza SLA non entrano nelle percentuali SLA dei KPI.
+## SLA a piani, configurabili dal portale (#46, #48)
+Ore di calendario, dall'apertura del ticket. Le regole sono **diverse per ogni attività** e stanno nel **DB** (tabelle `sla_business` e `sla_piani`): si cambiano da **Impostazioni > SLA** (solo `owner`), senza toccare file né riavviare. Per ogni attività:
+- **SLA standard** (prima risposta e risoluzione, priorità normale; la priorità lo scala: urgente ×0,25, alta ×0,5, bassa ×2). Se non lo imposti vale il **valore di partenza** (24 h / 72 h).
+- **Piani a pagamento**: nome libero (es. `48h`), prima risposta e risoluzione. Termini fissi, la priorità non li cambia.
+- **Piano dei ticket senza piano indicato**: SLA standard, oppure `nessuno` (senza SLA, best effort), oppure uno dei piani.
+Valori iniziali (migrazione 005), solo per **heyciar.it** (confermati da Elia): piani `48h` (il più alto), `3g`, `5g`, `7g`; chi non ha un piano è senza SLA. Per le altre attività nessun piano: valgono i valori di partenza finché non li imposti.
+[DA CONFERMARE] Ho letto "entro 48h, 3, 5, 7 giorni" come termine di **risoluzione**, con la prima risposta a metà termine (24, 36, 60, 84 ore); si cambia nel tab.
+- Il piano appartiene al **cliente** (si imposta nella scheda) e vale per le attività che lo prevedono; si può anche cambiare per un singolo ticket (le scadenze si ricalcolano dall'apertura).
+- Quale piano prende un ticket: quello indicato dal backend o dalla fonte (`piano_sla`), poi quello del cliente, poi il predefinito dell'attività, poi lo SLA standard.
+- **Cambiare le impostazioni vale per i ticket nuovi**: i ticket già aperti mantengono le scadenze calcolate. Un piano tolto non si cancella (resta `attivo = false`) e si può rimettere; non si può più assegnare.
+- I ticket senza SLA non entrano nelle percentuali SLA dei KPI.
 
 ## CRM
 - **Clienti**: l'anagrafica è la lista Clienti di ClickUp (#42). Dal portale si **crea** una scheda (se esiste già un cliente con la stessa email o P.IVA il portale apre quella esistente) e si **modifica** (nome, email, telefono, P.IVA, codice fiscale, attività): la scrittura va a ClickUp e poi alla copia. Errore di ClickUp = 502, nulla cambia. Lista ClickUp ancora non configurata = schede in sola lettura.
@@ -91,7 +96,7 @@ Prima di ogni rilascio: commit, push (lo esegue Elia), test in locale su Node 24
 1. **Migrazione 005** col Job (`scripts/rilascio/migra.sh 005_crm_ticket.sql`): solo tabelle nuove e permessi; non tocca documenti e contatori.
 2. **Backend dei business**: implementare [ticket-backend-api.md](ticket-backend-api.md) e creare i token; poi `scripts/vps/imposta-chiavi-crm.sh` (i valori si digitano, non si vedono).
 3. **Rilascio 0.2.0** (versione da aggiornare in `package.json`, `package-lock.json`, `k8s/app.yaml`) con `scripts/rilascio/rilascia.sh`. Con la ConfigMap ancora vuota il servizio parte invariato.
-4. **Liste ClickUp**: solo **Clienti** (campi email, P.IVA, CF, telefono, attività); ID in ConfigMap.
+4. **Lista ClickUp**: solo **Clienti** (campi email, P.IVA, CF, telefono, attività); ID in ConfigMap. Poi gli SLA di ogni attività da Impostazioni > SLA.
 5. **Fonti e backend**: `TICKET_FONTI` e `TICKET_BACKEND_URL_<FONTE>` in ConfigMap (i token prima nel Secret, altrimenti l'avvio si ferma: voluto).
 6. **Esposizione**: `k8s/ingress-crm.yaml` e/o NetworkPolicy verso i namespace dei backend [DA VERIFICARE].
 7. **Keycloak** e variabili `KEYCLOAK_*`, `DASHBOARD_URL_BASE`; riavvio.

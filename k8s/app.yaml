@@ -128,33 +128,17 @@ data:
   # TICKET_BACKEND_URL_SERRANDASU: ""
   # TICKET_BACKEND_URL_RETI: ""
   TICKET_SYNC_MIN: "5"              # ogni quanti minuti si rileggono i ticket dai backend
-  # SLA a piani (#46): piano=ore_prima_risposta/ore_risoluzione. Il livello più alto è 48h, poi 3, 5 e 7 giorni.
-  # [DA CONFERMARE: la prima risposta è stata posta alla metà del termine; i termini 48h/3g/5g/7g sono la risoluzione]
-  TICKET_SLA_PIANI: "48h=24/48,3g=36/72,5g=60/120,7g=84/168"
-  # Chi non ha un SLA a pagamento è senza SLA (best effort): heyciar parte da "nessuno", il piano si assegna al cliente nel portale.
-  TICKET_PIANO_PREDEFINITO: "heyciar.it=nessuno"
-  TICKET_SLA_ORE: ""                # SLA standard per attività senza piano (prima risposta/risoluzione, priorità normale), es. "reti.gazzolaelia.it=8/24"
-  TICKET_SLA_PRIMA_RISPOSTA_ORE: "24"
-  TICKET_SLA_RISOLUZIONE_ORE: "72"
-  # Liste ClickUp (spazio P.Iva o dove le crei): la lista CLIENTI è l'anagrafica unica (#42). I ticket NON stanno più in ClickUp (#47):
-  # CLICKUP_LIST_ID_TICKET resta solo per chi volesse ancora uno specchio dei ticket locali; si lascia vuota.
+  # Le regole SLA NON stanno qui: sono nel DB e si cambiano dal portale (Impostazioni > SLA), diverse per ogni attività (#46, #48).
+  # Liste ClickUp: solo la lista CLIENTI, anagrafica unica (#42). I ticket non stanno in ClickUp (#47): nel backend di ogni business o nel DB.
   CLICKUP_LIST_ID_CLIENTI: ""
-  CLICKUP_LIST_ID_TICKET: ""
   CLICKUP_CLIENTI_CAMPO_EMAIL_ID: ""
   CLICKUP_CLIENTI_CAMPO_PIVA_ID: ""
   CLICKUP_CLIENTI_CAMPO_CF_ID: ""
   CLICKUP_CLIENTI_CAMPO_TELEFONO_ID: ""
   CLICKUP_CLIENTI_CAMPO_BUSINESS_ID: ""   # menu a tendina o etichette con i nomi delle attività
-  CLICKUP_TICKET_CAMPO_REF_ID: ""         # OBBLIGATORIO con la lista ticket: campo testo con la chiave del ticket
-  CLICKUP_TICKET_CAMPO_BUSINESS_ID: ""
-  CLICKUP_TICKET_CAMPO_FONTE_ID: ""
-  CLICKUP_TICKET_CAMPO_CATEGORIA_ID: ""
-  CLICKUP_TICKET_CAMPO_CLIENTE_ID: ""     # relazione verso la lista Clienti
-  CLICKUP_TICKET_CAMPO_EMAIL_ID: ""
   CRM_BUSINESS_ALIAS: ""            # es. "reti=reti.gazzolaelia.it,visual=visual.gazzolaelia.it,serrandasu=serrandasu.it,heyciar=heyciar.it"
-  CRM_BUSINESS_PREDEFINITO: ""      # attività per i ticket aperti a mano in ClickUp senza il campo attività
+  CRM_BUSINESS_PREDEFINITO: ""      # attività da usare per le schede cliente create al pagamento quando il documento non ne indica una
   CRM_SYNC_CLIENTI_MIN: "60"
-  CRM_SYNC_TICKET_MIN: "10"
   CRM_CREA_CLIENTI: "false"         # "true": crea in ClickUp la scheda dei clienti pagati via Stripe/GoCardless che mancano (#42)
   # Dashboard con login Keycloak (KEYCLOAK_CLIENT_SECRET e DASHBOARD_SESSION_SECRET stanno nel Secret). Vuote = dashboard spenta.
   KEYCLOAK_ISSUER: ""               # URL del realm, es. https://<host-keycloak>/realms/<realm>

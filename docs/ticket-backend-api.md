@@ -34,7 +34,7 @@ Ticket creati o modificati dopo la data (tutti se manca). Paginazione a numero d
 ```
 - Obbligatori: `id` (lettere, numeri e `._:/-`, max 120), `oggetto`, `aperto_il`. Il resto è facoltativo; valori sconosciuti di stato e priorità diventano `aperto` e `normale`.
 - `prima_risposta_il` e `risolto_il` sono gli orari veri: il portale li usa per l'SLA (non li inventa).
-- `piano_sla` (facoltativo): se il backend conosce il piano del cliente (`48h`, `3g`, `5g`, `7g`, `nessuno`) lo indica; se manca vale quello del cliente nel portale, poi il predefinito dell'attività.
+- `piano_sla` (facoltativo): se il backend conosce il piano del cliente lo indica (`nessuno` o il nome di un piano che l'attività ha in Impostazioni > SLA, per heyciar `48h`, `3g`, `5g`, `7g`); un nome sconosciuto viene ignorato. Se manca vale il piano del cliente nel portale, poi il predefinito dell'attività.
 
 ### `GET /tickets/{id}/messaggi`
 ```json
