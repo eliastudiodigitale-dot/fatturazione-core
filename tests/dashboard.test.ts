@@ -333,11 +333,24 @@ describe('pagina', () => {
   it('il JavaScript della pagina è sintatticamente valido e non carica nulla da fuori', () => {
     expect(() => new Script(_perTest.SCRIPT)).not.toThrow();
     const html = paginaDashboard('NONCE');
-    expect(html).not.toMatch(/https?:\/\//);
+    // l'unico indirizzo è lo spazio dei nomi di SVG (un identificatore, non una risorsa che si carica)
+    expect(html.replaceAll('http://www.w3.org/2000/svg', '')).not.toMatch(/https?:\/\//);
     expect(html).not.toMatch(/<script[^>]+src=/);
     expect(html).not.toMatch(/<link[^>]+href=/);
     expect(html).toContain('nonce="NONCE"');
-    // ogni testo dai dati passa da esc(): niente innerHTML con valori grezzi di ticket/clienti nella cronologia
-    expect(_perTest.SCRIPT).toContain('function esc(');
+  });
+
+  it('i dati non entrano mai come HTML: solo nodi di testo; nessuno stile inline (la CSP li bloccherebbe)', () => {
+    // innerHTML compare una volta sola, per le icone costanti
+    expect(_perTest.SCRIPT.split('innerHTML').length - 1).toBe(1);
+    expect(_perTest.SCRIPT).toContain('function E(');
+    // "style:" compare solo nelle opzioni di Intl.NumberFormat (formato valuta), mai come attributo di un elemento
+    expect(_perTest.SCRIPT.match(/style:\s*['"]/g)?.length).toBe(2);
+    expect(_perTest.SCRIPT).not.toMatch(/setAttribute\(['"]style['"]/);
+    expect(paginaDashboard('N')).not.toMatch(/\sstyle="/);
+  });
+
+  it('il portale non contiene dati di esempio: nomi di clienti, attività o indirizzi di prova', () => {
+    for (const x of [/heyciar/i, /serrandasu/i, /gazzolaelia/i, /example\.org/i, /@locale/i, /\bRossi\b/, /\bVerdi\b/, /\bBianchi\b/, /Mario/, /\bAurora\b/]) expect(_perTest.SCRIPT).not.toMatch(x);
   });
 });
