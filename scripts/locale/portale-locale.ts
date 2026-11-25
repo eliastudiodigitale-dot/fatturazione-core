@@ -1,9 +1,9 @@
 // Portale operativo in locale, per vederlo e provarlo sul Mac (mai in produzione, mai con dati veri).
 //
 // Cosa avvia:
-//  - il VERO servizio (stesso codice, stesso DB Postgres locale delle migrazioni 001-005) su 127.0.0.1:8080;
+//  - il VERO servizio (stesso codice, stesso DB Postgres locale delle migrazioni 001-005) su 127.0.0.1:4381;
 //  - un finto backend ticket per heyciar e un finto ClickUp per le schede cliente (in memoria: servono solo per provare i giri);
-//  - un accesso locale su http://localhost:8081/dashboard che inserisce da solo la sessione del ruolo scelto, senza Keycloak.
+//  - un accesso locale su http://127.0.0.1:4380/dashboard che inserisce da solo la sessione del ruolo scelto, senza Keycloak.
 //    Ascolta solo su 127.0.0.1 ed è solo per prove: in produzione il login è Keycloak.
 //
 // Uso:  npx tsx scripts/locale/portale-locale.ts [owner|amministrazione|assistenza]
@@ -21,11 +21,12 @@ import { ENV_TEST } from '../../tests/setup/env.js';
 
 const RUOLO = (process.argv[2] ?? 'owner') as 'owner' | 'amministrazione' | 'assistenza';
 if (!['owner', 'amministrazione', 'assistenza'].includes(RUOLO)) throw new Error('ruolo: owner, amministrazione o assistenza');
-const PORTA_APP = 8080;
-const PORTA_PORTALE = 8081;
+// Porte insolite apposta: 8080 e 8081 sono spesso occupate da altri server di sviluppo (es. Expo/Metro).
+const PORTA_APP = 4381;
+const PORTA_PORTALE = 4380;
 const PG_PORTA = 55433;
 const SEGRETO = 'locale-'.padEnd(40, 'x');
-const URL_PORTALE = `http://localhost:${PORTA_PORTALE}`;
+const URL_PORTALE = `http://127.0.0.1:${PORTA_PORTALE}`;
 
 // ------------------------------------------------------------------ configurazione di prova (non sono segreti)
 const cfg = caricaConfig({
@@ -75,6 +76,11 @@ async function datiDiEsempio() {
     ('c1',NULL,'heyciar.it','Passaggio al piano 48h','proposta',1200,'demo@locale','demo@locale'),
     (NULL,'Hotel Bellavista','reti.gazzolaelia.it','Wifi per 40 camere','trattativa',4800,'demo@locale','demo@locale'),
     ('c2',NULL,'serrandasu.it','Serranda nuova','nuova',2500,NULL,'demo@locale')`);
+  await admin.query(`INSERT INTO crm_opportunita (cliente_task_id, business, titolo, fase, valore, creato_da, aggiornato_il) VALUES ('c4','reti.gazzolaelia.it','Rinnovo contratto assistenza','contattato',1500,'demo@locale', now() - interval '25 days')`);
+  await admin.query(`INSERT INTO risposte_rapide (nome, testo, creato_da) VALUES
+    ('Presa in carico', 'Buongiorno {{cliente}}, abbiamo preso in carico la sua richiesta ({{rif}}) e le risponderemo appena possibile. {{agente}}', 'demo@locale'),
+    ('Richiesta di informazioni', 'Buongiorno {{cliente}}, per procedere ci servirebbero alcune informazioni in più: può indicarci quando si è verificato il problema? {{agente}}', 'demo@locale'),
+    ('Chiusura', 'Buongiorno {{cliente}}, la sua richiesta ({{rif}}) risulta risolta. Se serve altro risponda pure a questo messaggio. {{agente}}', 'demo@locale')`);
   await admin.query(`INSERT INTO utenti_dashboard (sub, nome, email, ruoli) VALUES ('anna','Anna Assistenza','anna@locale','{assistenza}'), ('luca','Luca Amministrazione','luca@locale','{amministrazione}')`);
   return true;
 }
@@ -147,7 +153,7 @@ setInterval(giro, 20_000).unref();
 const business = RUOLO === 'owner' ? null : RUOLO === 'assistenza' ? ['heyciar.it', 'reti.gazzolaelia.it'] : ['heyciar.it', 'reti.gazzolaelia.it', 'serrandasu.it'];
 const sessione = () => `dash_sess=${firma({ sub: RUOLO, nome: `Demo ${RUOLO}`, email: `${RUOLO}@locale`, ruoli: [RUOLO], business, exp: Math.floor(Date.now() / 1000) + 8 * 3600 }, SEGRETO)}`;
 const proxy = http.createServer((req, res) => {
-  const r = http.request({ host: '127.0.0.1', port: PORTA_APP, path: req.url, method: req.method, headers: { ...req.headers, cookie: sessione(), host: `localhost:${PORTA_APP}` } }, (u) => {
+  const r = http.request({ host: '127.0.0.1', port: PORTA_APP, path: req.url, method: req.method, headers: { ...req.headers, cookie: sessione(), host: `127.0.0.1:${PORTA_APP}`, ...(req.headers.origin ? { origin: URL_PORTALE } : {}) } }, (u) => {
     res.writeHead(u.statusCode ?? 502, u.headers);
     u.pipe(res);
   });
@@ -157,12 +163,16 @@ const proxy = http.createServer((req, res) => {
   });
   req.pipe(r);
 });
+proxy.on('error', (e: NodeJS.ErrnoException) => {
+  console.error(e.code === 'EADDRINUSE' ? `La porta ${PORTA_PORTALE} è già occupata da un altro programma: chiudilo o cambia PORTA_PORTALE in scripts/locale/portale-locale.ts` : e.message);
+  process.exit(1);
+});
 proxy.listen(PORTA_PORTALE, '127.0.0.1', () => {
   console.log('\n──────────────────────────────────────────────');
   console.log(` Portale locale pronto: ${URL_PORTALE}/dashboard`);
   console.log(` Ruolo: ${RUOLO}${business ? ` (attività: ${business.join(', ')})` : ' (tutte le attività)'}`);
   console.log(seminato ? ' Dati di esempio inseriti nel DB locale (prima volta).' : ' DB locale già popolato: dati di prima conservati.');
-  console.log(' Servizio: http://127.0.0.1:8080 · Postgres locale: 127.0.0.1:55433');
+  console.log(` Servizio: http://127.0.0.1:${PORTA_APP} · Postgres locale: 127.0.0.1:${PG_PORTA}`);
   console.log(' Ctrl+C per fermare. Per un altro ruolo: riavvia con owner, amministrazione o assistenza.');
   console.log('──────────────────────────────────────────────\n');
 });

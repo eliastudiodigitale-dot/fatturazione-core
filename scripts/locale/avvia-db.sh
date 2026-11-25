@@ -36,16 +36,26 @@ psql_in() { # utente db [variabili psql]… < sql da stdin
   docker exec -i "$CONTAINER" psql -q -U "$u" -d "$d" -v ON_ERROR_STOP=1 ${v[@]+"${v[@]}"}
 }
 
-if docker exec "$CONTAINER" psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='fatturazione'" | grep -q 1; then
-  echo "DB locale già pronto (porta $PORTA)."
-  exit 0
+# Impronta delle migrazioni: la 005 non è ancora applicata in produzione e può cambiare. Se cambia, il DB LOCALE (solo dati di prova)
+# si ricrea da zero, così lo schema locale è sempre quello del repo.
+IMPRONTA=$(cat migrations/*.sql | shasum -a 256 | cut -c1-16)
+ESISTE=$(docker exec "$CONTAINER" psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='fatturazione'" || true)
+if [ "$ESISTE" = "1" ]; then
+  ATTUALE=$(docker exec "$CONTAINER" psql -U postgres -d postgres -tAc "SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname='fatturazione'" || true)
+  if [ "$ATTUALE" = "migrazioni:$IMPRONTA" ]; then
+    echo "DB locale già pronto (porta $PORTA)."
+    exit 0
+  fi
+  echo "Le migrazioni sono cambiate dall'ultima volta: ricreo il DB locale (contiene solo dati di prova)…"
+  echo "DROP DATABASE fatturazione WITH (FORCE); DROP ROLE IF EXISTS fatturazione_app; DROP ROLE IF EXISTS fatturazione;" | psql_in postgres postgres
 fi
 
-echo "Primo avvio: creo ruoli, DB e applico le migrazioni (come in produzione: 001 owner, 002 superutente, 003-005 owner)…"
+echo "Creo ruoli e DB e applico le migrazioni (come in produzione: 001 owner, 002 superutente, 003-005 owner)…"
 echo "CREATE ROLE fatturazione LOGIN PASSWORD 'owner_locale'; CREATE DATABASE fatturazione OWNER fatturazione;" | psql_in postgres postgres
 psql_in fatturazione fatturazione < migrations/001_schema.sql
 psql_in postgres fatturazione pw=app_locale < migrations/002_permessi.sql
 psql_in fatturazione fatturazione < migrations/003_lettura_contatori.sql
 psql_in fatturazione fatturazione < migrations/004_data_riserva_ordinata.sql
 psql_in fatturazione fatturazione < migrations/005_crm_ticket.sql
+echo "COMMENT ON DATABASE fatturazione IS 'migrazioni:$IMPRONTA';" | psql_in postgres postgres
 echo "DB locale pronto."
