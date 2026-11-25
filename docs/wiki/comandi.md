@@ -9,7 +9,7 @@ Dal repo (Node 24, `engines` in package.json):
 - `npm run dev` — avvio con tsx in watch su `src/index.ts`
 - `npm start` — avvio da `dist/index.js`
 - `npm run locale:db` — solo il Postgres di prova in Docker per il portale locale (porta 55433, `scripts/locale/avvia-db.sh`)
-- `npm run locale` — portale locale su http://localhost:8081/dashboard, senza Keycloak, con finti backend ticket e ClickUp (solo localhost, `scripts/locale/portale-locale.ts`)
+- `npm run locale` — portale locale su http://127.0.0.1:4380/dashboard, senza Keycloak, con finti backend ticket e ClickUp (solo localhost, `scripts/locale/portale-locale.ts`)
 
 Script operativi (lanciati dal Mac da Elia; la lista completa è nei file):
 

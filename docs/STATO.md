@@ -15,7 +15,7 @@ Aggiornato: 2026-11-24 (chiusura 17:29). File sovrascritto a ogni chiusura (max 
 - Ticket (#47): vivono nel backend di ogni business e il servizio li richiama via API (contratto `docs/ticket-backend-api.md`, client `src/ticket-backend.ts`, operazioni `src/ticket-ops.ts`; prima il backend, poi la copia locale; sync ogni TICKET_SYNC_MIN=5 min). Senza backend stanno nel DB del servizio. Lista ticket di ClickUp rimossa dal codice.
 - SLA (#46, #48): regole nel DB (migrazione 005: `sla_business`, `sla_piani`; `src/sla.ts`), configurabili dal portale per attività. Piani heyciar 48h / 3g / 5g / 7g; heyciar senza piano = nessuno SLA; altre attività 24/72 di partenza. Il piano è del cliente (`crm_clienti.piano_sla`) e del ticket. Modifiche valgono per i ticket nuovi.
 - CRM (#42, #45): `src/crm-ops.ts`. Scheda cliente creata/modificata su ClickUp, poi copia in cache; contatti, note, attività, trattative, duplicati, viste; dati del portale nel DB.
-- Avvio locale: `npm run locale` (Postgres Docker separato, porta 55433; finti backend e ClickUp; http://localhost:8081/dashboard senza Keycloak, solo localhost). `npm run locale:db` solo il database. `.nvmrc` = 24.
+- Avvio locale: `npm run locale` (Postgres Docker separato, porta 55433; finti backend e ClickUp; http://127.0.0.1:4380/dashboard senza Keycloak, solo localhost). `npm run locale:db` solo il database. `.nvmrc` = 24.
 - Verifiche del 2026-11-24 [riportato dalla sessione]: Node 24.22, tsc, typecheck:test, build OK, 197 test su 197. Pagina del portale provata in jsdom (29 passaggi, ruoli owner e assistenza) con harness fuori dal repo.
 
 ## In corso

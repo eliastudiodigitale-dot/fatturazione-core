@@ -6,20 +6,24 @@ Stato: scritto e testato in locale su Node 24 (suite completa e prova della pagi
 ```
 cd /Users/elia/offline/REPO-locali/fatturazione-core && source ~/.nvm/nvm.sh && nvm use && npm run locale
 ```
-Apre un Postgres 16 locale in Docker (`fatturazione-locale-pg`, porta 55433, dati in un volume), applica le migrazioni 001-005, inserisce dati di esempio la prima volta e avvia il servizio vero con un finto backend heyciar e un finto ClickUp. Poi apri **http://localhost:8081/dashboard** (nessun login: la sessione la mette lo script, solo su localhost). Altro ruolo: `npm run locale -- assistenza` (o `amministrazione`). Ctrl+C per fermare. Ripartire da zero: `docker rm -f fatturazione-locale-pg && docker volume rm fatturazione-locale-dati`. Il DB dei test è un altro container e non si tocca.
+Apre un Postgres 16 locale in Docker (`fatturazione-locale-pg`, porta 55433, dati in un volume), applica le migrazioni 001-005, inserisce dati di esempio la prima volta e avvia il servizio vero con un finto backend heyciar e un finto ClickUp. Poi apri **http://127.0.0.1:4380/dashboard** (nessun login: la sessione la mette lo script, solo su localhost). Altro ruolo: `npm run locale -- assistenza` (o `amministrazione`). Ctrl+C per fermare. Ripartire da zero: `docker rm -f fatturazione-locale-pg && docker volume rm fatturazione-locale-dati`. Il DB dei test è un altro container e non si tocca.
 
 ## Come funziona
-Il portale (`/dashboard`) è il centro operativo: menu a sezioni, ognuna legge e scrive. Oggi sono quattro, altre si aggiungono.
+Il portale (`/dashboard`) è il centro operativo: ogni sezione legge e scrive. Stile sobrio da strumento di lavoro, tema chiaro, scuro o automatico (Impostazioni > Personalizza, per browser), ricerca globale (tasto `/`), filtro attività in alto, scorciatoie da tastiera (`?`).
 
 | Sezione | Cosa si fa | Dove stanno i dati |
 |---|---|---|
-| **Cruscotto** | KPI, "da fare adesso" (ticket da prendere, SLA scaduti, attività scadute), confronto tra attività | copie locali + documenti |
-| **Ticket** | elenco con filtri e viste salvate, apertura, assegnazione, stato, priorità, risposte e note interne, piano SLA, export CSV | nel **backend di ogni business**, richiamato via API (#47); i business senza backend: nel **DB Postgres** del servizio |
-| **CRM** | Clienti (scheda completa), Trattative (pipeline), Da fare (attività e promemoria), Duplicati | clienti in **ClickUp** (#42); contatti, note, attività, trattative e viste nel DB del portale |
-| **Impostazioni** (solo owner) | SLA per attività: valori di partenza, SLA standard, piani a pagamento | DB (`sla_business`, `sla_piani`) |
-| **Fatturazione** | documenti in **sola lettura**, filtri (tipo, stato, origine, anno, date, importo, cliente, testo), somma sulla selezione, dettaglio con righe e storico, export CSV | DB del servizio (numerazione ufficiale, #1) |
+| **Oggi** | solo ciò che richiede azione: ticket da prendere, SLA scaduti, SLA a rischio (entro 4 ore), mie attività scadute; elenchi brevi con "Vedi tutti" (ticket da prendere o in scadenza, miei ticket, mie attività di oggi, trattative ferme da 14 giorni, ultimi documenti) | letture dei dati sotto |
+| **Ticket** | tre colonne come negli help desk professionali: viste con i numeri (Da prendere, Assegnati a me, Non assegnati, In attesa del cliente, SLA scaduti, SLA a rischio, Tutti gli aperti, Risolti di recente, Tutti) più le tue viste salvate; elenco denso con barra di priorità e countdown SLA; area di lavoro con conversazione, risposta o nota interna, "Invia e risolvi", risposte rapide con segnaposto, proprietà modificabili al volo, cliente e suoi altri ticket; selezione multipla (assegna, cambia stato); `j`/`k`, `a`, `r`, `e` | nel **backend di ogni business**, richiamato via API (#47); i business senza backend: nel **DB Postgres** del servizio |
+| **CRM** | Clienti (elenco con filtri e viste; scheda a tre colonne: informazioni modificabili su ClickUp; note, attività e cronologia filtrabile; contatti, da fare, trattative, ticket, documenti); Trattative (colonne trascinabili, valori per fase, segnale "ferma da N giorni"); Da fare (Scadute, Oggi, Prossimi 7 giorni, Più avanti, inserimento in una riga); Duplicati | clienti in **ClickUp** (#42); contatti, note, attività, trattative e viste nel DB del portale |
+| **Fatturazione** | documenti in **sola lettura**: filtri (tipo, stato, origine, anno, date, importo, testo), somma sulla selezione, importi per mese, dettaglio con righe e storico, CSV | DB del servizio (numerazione ufficiale, #1) |
+| **Report** | pochi numeri per tab, scelti perché servono a decidere: Ticket (aperti, SLA %, prima risposta mediana, tempo di risoluzione, arrivati/risolti, distribuzioni), Clienti (totali, nuovi, attivi, confronto tra attività), Fatturato (totale, media, serie, primi clienti); periodo a scelta | copie locali + documenti |
+| **Impostazioni** | SLA per attività e Risposte rapide (solo owner); Personalizza: tema chiaro/scuro/automatico e densità (tutti) | DB (`sla_business`, `sla_piani`, `risposte_rapide`); preferenze nel browser |
 
 Chi lavora lì è un utente Keycloak: ogni accesso lo rende assegnabile ai ticket e alle attività.
+
+### Nessun dato di esempio (#49)
+Il codice del portale non contiene nomi di clienti, attività, indirizzi o numeri di prova: tutto arriva dall'API e dal DB, e senza integrazioni collegate le pagine mostrano stati vuoti che dicono cosa aspettarsi. Un test lo verifica (`tests/dashboard.test.ts`). I dati di esempio esistono solo nello script di prova locale (`npm run locale`, DB e porta separati), mai in produzione. Valori che cambiano per ambiente stanno in configurazione: attività e fonti ticket (`TICKET_FONTI`, `CRM_BUSINESS_ALIAS`), URL dei backend, ID ClickUp, Keycloak; SLA e risposte rapide si gestiscono dal portale.
 
 ## Ticket (#47)
 - Ogni business espone un'API per i ticket: contratto in [ticket-backend-api.md](ticket-backend-api.md). Il servizio la rilegge ogni `TICKET_SYNC_MIN` minuti (5) in una copia locale per filtri, KPI e SLA; i messaggi non si copiano, si leggono dal backend quando apri il ticket.
