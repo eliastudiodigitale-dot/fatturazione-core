@@ -16,6 +16,7 @@ import { dettaglioDocumento, elencoDocumenti, riepilogoMensile, type FiltroDocum
 import { PRIORITA, STATI_TICKET, ErroreTicket, elencoTicket, pianiAmmessi, type Priorita, type StatoTicket } from './ticket.js';
 import { conversazione, creaDaPortale, modifica, rispondi, type DepsOps } from './ticket-ops.js';
 import type { Ambito } from './sql.js';
+import { aggiornaRisposta, cerca, conteggiViste, creaRisposta, eliminaRisposta, elencoRisposte } from './portale.js';
 import type { BackendTicket } from './ticket-backend.js';
 import { ErroreSla, impostazioniSla, salvaImpostazioniSla, type ImpostazioniSla, type SlaStore } from './sla.js';
 
@@ -369,7 +370,7 @@ export function registraOperativo(app: FastifyInstance, d: DepsOperativo, richie
     const q = req.query;
     const fase = lista(q.fase);
     for (const f of fase ?? []) if (!(FASI_OPPORTUNITA as readonly string[]).includes(f)) throw new ErroreRichiesta(`fase non valida: ${f}`);
-    return elencoOpportunita(pool, ctx(req).ambito, { business: lista(q.business), fase: fase as Fase[] | undefined, assegnato: q.assegnato || undefined, cliente: q.cliente || undefined, q: q.q?.trim() || undefined, aperte: q.aperte === 'true' });
+    return elencoOpportunita(pool, ctx(req).ambito, { business: lista(q.business), fase: fase as Fase[] | undefined, assegnato: q.assegnato || undefined, cliente: q.cliente || undefined, q: q.q?.trim() || undefined, aperte: q.aperte === 'true', ferme: numero(q.ferme_giorni, 'ferme_giorni') });
   });
   const propsOpp = {
     titolo: testo(300), business: businessSchema, cliente: { anyOf: [testo(40), { type: 'null' }] }, prospect: { anyOf: [testo(200), { type: 'null' }] }, fase: { type: 'string', enum: FASI_OPPORTUNITA },
@@ -389,6 +390,42 @@ export function registraOperativo(app: FastifyInstance, d: DepsOperativo, richie
     const { ambito, p } = ctx(req);
     consenti(p.crmAnagrafica, 'modificare le trattative');
     await aggiornaOpportunita(pool, ambito, idNum(req.params.id), req.body as never);
+    return { ok: true };
+  });
+
+  // ------------------------------------------------------------ viste dei ticket con i numeri, ricerca globale, risposte rapide
+  app.get<{ Querystring: Q }>(`${P}/ticket-viste`, { preHandler: lettura }, async (req) => {
+    const { s, ambito } = ctx(req);
+    return conteggiViste(pool, ambito, s.email ?? s.nome, lista(req.query.business));
+  });
+
+  app.get<{ Querystring: Q }>(`${P}/cerca`, { preHandler: lettura, schema: { querystring: obj({ q: { type: 'string', maxLength: 100 }, business: { type: 'string', maxLength: 200 } }) } }, async (req) => {
+    return cerca(pool, ctx(req).ambito, req.query.q ?? '', lista(req.query.business));
+  });
+
+  app.get(`${P}/risposte-rapide`, { preHandler: lettura }, async (req) => ({ risposte: await elencoRisposte(pool, ctx(req).ambito) }));
+  const propsRisposta = { nome: testo(80), testo: testo(4000), business: { anyOf: [businessSchema, { type: 'null' }] } };
+  app.post<{ Body: { nome: string; testo: string; business?: string | null } }>(
+    `${P}/risposte-rapide`,
+    { preHandler: scrittura, schema: { body: obj(propsRisposta, ['nome', 'testo']) } },
+    async (req, reply) => {
+      const { p, chi } = ctx(req);
+      consenti(p.impostazioni, 'gestire le risposte rapide');
+      return reply.code(201).send({ id: await creaRisposta(pool, req.body, chi) });
+    },
+  );
+  app.patch<{ Params: { id: string }; Body: { nome?: string; testo?: string; business?: string | null } }>(
+    `${P}/risposte-rapide/:id`,
+    { preHandler: scrittura, schema: { body: obj(propsRisposta) } },
+    async (req) => {
+      consenti(ctx(req).p.impostazioni, 'gestire le risposte rapide');
+      await aggiornaRisposta(pool, idNum(req.params.id), req.body);
+      return { ok: true };
+    },
+  );
+  app.delete<{ Params: { id: string } }>(`${P}/risposte-rapide/:id`, { preHandler: scrittura }, async (req) => {
+    consenti(ctx(req).p.impostazioni, 'gestire le risposte rapide');
+    await eliminaRisposta(pool, idNum(req.params.id));
     return { ok: true };
   });
 

@@ -348,6 +348,8 @@ export interface FiltroOpportunita {
   cliente?: string;
   q?: string;
   aperte?: boolean;
+  /** Solo trattative aperte non toccate da almeno questi giorni. */
+  ferme?: number;
 }
 
 /** Elenco e riepilogo per fase (numero e valore). Gli importi li vede solo chi ha `soldi`. */
@@ -357,6 +359,7 @@ export async function elencoOpportunita(pool: pg.Pool, ambito: Ambito, f: Filtro
   if (b !== null) cond.aggiungi('o.business = ANY(?)', b);
   if (f.fase?.length) cond.aggiungi('o.fase = ANY(?)', f.fase);
   if (f.aperte) cond.fissa(`o.fase NOT IN ('vinta','persa')`);
+  if (f.ferme) cond.fissa(`o.fase NOT IN ('vinta','persa') AND o.aggiornato_il < now() - interval '${Math.min(Math.max(Math.floor(f.ferme), 1), 3650)} days'`);
   if (f.assegnato) cond.aggiungi('o.assegnato_a ILIKE ?', perIlike(f.assegnato));
   if (f.cliente) cond.aggiungi('o.cliente_task_id = ?', f.cliente);
   if (f.q) cond.aggiungi('(o.titolo ILIKE ? OR o.prospect ILIKE ? OR c.nome ILIKE ?)', perIlike(f.q));

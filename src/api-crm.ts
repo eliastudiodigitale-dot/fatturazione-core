@@ -95,6 +95,7 @@ function filtroTicket(q: Query): FiltroTicket {
     cliente: q.cliente || undefined,
     q: q.q?.trim() || undefined,
     scaduti: q.scaduti === 'true',
+    aRischio: q.a_rischio === 'true',
     da: da?.toISOString(),
     a: a?.toISOString(),
     ordine,
@@ -122,7 +123,7 @@ const schemaQuery = (nomi: string[]) => ({
   additionalProperties: false,
   properties: Object.fromEntries(nomi.map((n) => [n, { type: 'string', maxLength: 200 }])),
 });
-const QUERY_TICKET = schemaQuery(['business', 'fonte', 'stato', 'priorita', 'assegnato', 'non_assegnati', 'piano', 'cliente', 'q', 'scaduti', 'da', 'a', 'ordine', 'limite', 'offset']);
+const QUERY_TICKET = schemaQuery(['business', 'fonte', 'stato', 'priorita', 'assegnato', 'non_assegnati', 'piano', 'cliente', 'q', 'scaduti', 'a_rischio', 'da', 'a', 'ordine', 'limite', 'offset']);
 const QUERY_CLIENTI = schemaQuery(['business', 'q', 'stato', 'con_ticket_aperti', 'senza_fatture', 'ordine', 'limite', 'offset']);
 const QUERY_KPI = schemaQuery(['business', 'fonte', 'da', 'a', 'giorni', 'granularita']);
 

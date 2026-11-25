@@ -634,3 +634,78 @@ describe('ENV di prova', () => {
     expect(ENV_TEST.OWNER_TOKEN).not.toBe(ENV_DASH.TICKET_BACKEND_TOKEN_HEYCIAR);
   });
 });
+
+describe('viste con i numeri, ricerca globale, risposte rapide, trattative ferme', () => {
+  const seme = async () => {
+    await admin.query(`INSERT INTO ticket (ref, fonte, origine, business, oggetto, stato, priorita, assegnato_a, cliente_nome, aperto_il, prima_risposta_il, scade_prima_risposta, scade_risoluzione, risolto_il) VALUES
+      ('heyciar|1','heyciar','remoto','heyciar.it','Accesso negato','aperto','alta',NULL,'Rossi Srl', now(), NULL, now() + interval '2 hours', now() + interval '40 hours', NULL),
+      ('heyciar|2','heyciar','remoto','heyciar.it','Fattura errata','in_lavorazione','normale','owner@example.org','Rossi Srl', now(), now(), now() + interval '30 hours', now() + interval '2 hours', NULL),
+      ('reti|1','reti','locale','reti.gazzolaelia.it','Wifi giù','aperto','urgente',NULL,'Hotel Aurora', now() - interval '2 days', NULL, now() - interval '5 hours', now() + interval '10 hours', NULL),
+      ('reti|2','reti','locale','reti.gazzolaelia.it','Richiesta chiusa','risolto','normale',NULL,'Hotel Aurora', now() - interval '3 days', now() - interval '2 days', NULL, NULL, now() - interval '1 day'),
+      ('reti|3','reti','locale','reti.gazzolaelia.it','In attesa','in_attesa_cliente','bassa','anna@example.org','Studio Bianchi', now(), now(), now() + interval '30 hours', now() + interval '60 hours', NULL)`);
+    await admin.query(`INSERT INTO crm_clienti (clickup_task_id, nome, email, partita_iva, businesses) VALUES ('c1','Rossi Srl','info@rossi.it','12345678901','{heyciar.it}'), ('c2','Hotel Aurora','info@aurora.it',NULL,'{reti.gazzolaelia.it}')`);
+  };
+
+  it('conteggi: da prendere, miei, non assegnati, a rischio entro 4 ore, scaduti, risolti di recente', async () => {
+    const { app } = await portale();
+    await seme();
+    const c = (await app.inject({ method: 'GET', url: '/dashboard/api/ticket-viste', headers: OWNER })).json();
+    expect(c).toEqual({ aperti: 4, da_prendere: 2, non_assegnati: 2, miei: 1, in_attesa: 1, sla_scaduti: 1, sla_a_rischio: 2, risolti_7g: 1 });
+    // ruolo ristretto e filtro attività: i numeri seguono l'ambito
+    const r = (await app.inject({ method: 'GET', url: '/dashboard/api/ticket-viste', headers: cookie(['assistenza'], ['heyciar.it'], 'anna') })).json();
+    expect(r).toMatchObject({ aperti: 2, da_prendere: 1, miei: 0 });
+    expect((await app.inject({ method: 'GET', url: '/dashboard/api/ticket-viste?business=reti.gazzolaelia.it', headers: OWNER })).json().aperti).toBe(2);
+    await app.close();
+  });
+
+  it('filtro "a rischio": prossima scadenza entro 4 ore, non ancora scaduta', async () => {
+    const { app } = await portale();
+    await seme();
+    const r = (await app.inject({ method: 'GET', url: '/dashboard/api/ticket?a_rischio=true&ordine=scadenza', headers: OWNER })).json();
+    expect(r.ticket.map((t: { ref: string }) => t.ref).sort()).toEqual(['heyciar|1', 'heyciar|2']);
+    expect(r.ticket.every((t: { sla_a_rischio: boolean }) => t.sla_a_rischio)).toBe(true);
+    await app.close();
+  });
+
+  it('ricerca globale: ticket, clienti e documenti nell\'ambito; testo troppo corto = niente', async () => {
+    const { app } = await portale();
+    await seme();
+    await admin.query(`INSERT INTO documenti (ref, anno, tipo, numero, fonte, business, payload) VALUES ('d1', 2026, 'fattura', 7, 'stripe', 'heyciar.it', '{"cliente":{"ragione_sociale":"Rossi Srl"},"righe":[{"descrizione":"x","importo":100}]}')`);
+    const r = (await app.inject({ method: 'GET', url: '/dashboard/api/cerca?q=rossi', headers: OWNER })).json();
+    expect(r.ticket.map((t: { ref: string }) => t.ref).sort()).toEqual(['heyciar|1', 'heyciar|2']);
+    expect(r.clienti.map((c: { nome: string }) => c.nome)).toEqual(['Rossi Srl']);
+    expect(r.documenti.map((d: { ref: string }) => d.ref)).toEqual(['d1']);
+    expect((await app.inject({ method: 'GET', url: '/dashboard/api/cerca?q=r', headers: OWNER })).json()).toEqual({ ticket: [], clienti: [], documenti: [] });
+    const ass = (await app.inject({ method: 'GET', url: '/dashboard/api/cerca?q=aurora', headers: cookie(['assistenza'], ['heyciar.it'], 'anna') })).json();
+    expect(ass).toEqual({ ticket: [], clienti: [], documenti: [] });
+    const senzaSoldi = (await app.inject({ method: 'GET', url: '/dashboard/api/cerca?q=rossi', headers: cookie(['assistenza'], ['heyciar.it'], 'anna') })).json();
+    expect(senzaSoldi.documenti).toEqual([]);
+    expect(senzaSoldi.clienti).toHaveLength(1);
+    await app.close();
+  });
+
+  it('risposte rapide: le gestisce solo owner, le leggono tutti nell\'ambito, tolte = disattivate', async () => {
+    const { app } = await portale();
+    const h = { ...OWNER, ...scrive };
+    const a = (await app.inject({ method: 'POST', url: '/dashboard/api/risposte-rapide', headers: h, payload: { nome: 'Presa in carico', testo: 'Ciao {{cliente}}, ce ne occupiamo noi. {{agente}}' } })).json().id;
+    await app.inject({ method: 'POST', url: '/dashboard/api/risposte-rapide', headers: h, payload: { nome: 'Solo reti', testo: 'Testo', business: 'reti.gazzolaelia.it' } });
+    const ass = cookie(['assistenza'], ['heyciar.it'], 'anna');
+    expect((await app.inject({ method: 'GET', url: '/dashboard/api/risposte-rapide', headers: ass })).json().risposte.map((r: { nome: string }) => r.nome)).toEqual(['Presa in carico']);
+    expect((await app.inject({ method: 'GET', url: '/dashboard/api/risposte-rapide', headers: OWNER })).json().risposte).toHaveLength(2);
+    expect((await app.inject({ method: 'POST', url: '/dashboard/api/risposte-rapide', headers: { ...ass, ...scrive }, payload: { nome: 'x', testo: 'y' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PATCH', url: `/dashboard/api/risposte-rapide/${a}`, headers: h, payload: { nome: 'Presa in carico 2' } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'DELETE', url: `/dashboard/api/risposte-rapide/${a}`, headers: h })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'DELETE', url: `/dashboard/api/risposte-rapide/${a}`, headers: h })).statusCode).toBe(404);
+    expect((await admin.query('SELECT count(*)::int AS n FROM risposte_rapide WHERE NOT attivo')).rows[0].n).toBe(1);
+    await app.close();
+  });
+
+  it('trattative ferme: aperte e non toccate da almeno N giorni', async () => {
+    const { app } = await portale();
+    await admin.query(`INSERT INTO crm_opportunita (prospect, business, titolo, fase, creato_da, aggiornato_il) VALUES
+      ('A','reti.gazzolaelia.it','Vecchia','proposta','x', now() - interval '20 days'), ('B','reti.gazzolaelia.it','Recente','proposta','x', now()), ('C','reti.gazzolaelia.it','Persa vecchia','persa','x', now() - interval '60 days')`);
+    const r = (await app.inject({ method: 'GET', url: '/dashboard/api/opportunita?ferme_giorni=14', headers: OWNER })).json();
+    expect(r.opportunita.map((o: { titolo: string }) => o.titolo)).toEqual(['Vecchia']);
+    await app.close();
+  });
+});

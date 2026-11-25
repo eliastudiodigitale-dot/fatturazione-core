@@ -264,6 +264,8 @@ export interface FiltroTicket {
   q?: string;
   /** Solo ticket con SLA già scaduto (risposta o risoluzione). */
   scaduti?: boolean;
+  /** Solo ticket la cui prossima scadenza SLA cade entro 4 ore (non ancora scaduta). */
+  aRischio?: boolean;
   da?: string;
   a?: string;
   ordine?: 'recenti' | 'vecchi' | 'scadenza' | 'priorita';
@@ -271,13 +273,15 @@ export interface FiltroTicket {
   offset?: number;
 }
 
-const APERTO = `stato NOT IN ('risolto','chiuso')`;
+export const APERTO = `stato NOT IN ('risolto','chiuso')`;
 export const SLA_RISPOSTA_SCADUTA = `(prima_risposta_il IS NULL AND scade_prima_risposta < now() AND ${APERTO})`;
 export const SLA_RISOLUZIONE_SCADUTA = `(risolto_il IS NULL AND scade_risoluzione < now() AND ${APERTO})`;
+/** Prossima scadenza SLA entro 4 ore e non ancora superata: serve per "a rischio". */
+export const SLA_A_RISCHIO = `(${APERTO} AND NOT (${SLA_RISPOSTA_SCADUTA} OR ${SLA_RISOLUZIONE_SCADUTA}) AND ((prima_risposta_il IS NULL AND scade_prima_risposta < now() + interval '4 hours') OR (risolto_il IS NULL AND scade_risoluzione < now() + interval '4 hours')))`;
 
 const COLONNE = `id, ref, fonte, origine, piano_sla, business, oggetto, priorita, stato, categoria, canale, cliente_nome, cliente_email, cliente_task_id, assegnato_a,
   aperto_il, prima_risposta_il, risolto_il, scade_prima_risposta, scade_risoluzione,
-  ${SLA_RISPOSTA_SCADUTA} AS sla_risposta_scaduta, ${SLA_RISOLUZIONE_SCADUTA} AS sla_risoluzione_scaduta`;
+  ${SLA_RISPOSTA_SCADUTA} AS sla_risposta_scaduta, ${SLA_RISOLUZIONE_SCADUTA} AS sla_risoluzione_scaduta, ${SLA_A_RISCHIO} AS sla_a_rischio`;
 
 const ORDINI: Record<NonNullable<FiltroTicket['ordine']>, string> = {
   recenti: 'aperto_il DESC, id DESC',
@@ -299,6 +303,7 @@ export function condizioniTicket(ambito: Ambito, f: FiltroTicket): Condizioni | 
   if (f.cliente) cond.aggiungi('cliente_task_id = ?', f.cliente);
   if (f.q) cond.aggiungi(`(oggetto ILIKE ? OR cliente_nome ILIKE ? OR cliente_email ILIKE ? OR ref ILIKE ?)`, perIlike(f.q));
   if (f.scaduti) cond.fissa(`(${SLA_RISPOSTA_SCADUTA} OR ${SLA_RISOLUZIONE_SCADUTA})`);
+  if (f.aRischio) cond.fissa(SLA_A_RISCHIO);
   if (f.da) cond.aggiungi('aperto_il >= ?::timestamptz', f.da);
   if (f.a) cond.aggiungi('aperto_il < ?::timestamptz', f.a);
   return cond;

@@ -24,7 +24,7 @@ export async function impostaSlaTest() {
 
 export async function svuota() {
   await admin.query(
-    'TRUNCATE storico, documenti, eventi_ricevuti, contatori, ticket_messaggi, ticket_eventi, ticket, crm_clienti, crm_sync, crm_contatti, crm_note, crm_attivita, crm_opportunita, crm_viste, utenti_dashboard RESTART IDENTITY CASCADE',
+    'TRUNCATE storico, documenti, eventi_ricevuti, contatori, ticket_messaggi, ticket_eventi, ticket, crm_clienti, crm_sync, crm_contatti, crm_note, crm_attivita, crm_opportunita, crm_viste, utenti_dashboard, risposte_rapide RESTART IDENTITY CASCADE',
   );
   await impostaSlaTest();
 }
@@ -231,6 +231,8 @@ export class BackendFinto implements BackendTicket {
   async rispondi(id: string, m: { testo: string; autore: string; interno: boolean }) {
     if (this.giu) this.errore();
     this.chiamate.push({ op: 'rispondi', id, dati: m });
+    // Come un backend vero: il messaggio si rilegge nella conversazione.
+    (this.msg.get(id) ?? this.msg.set(id, []).get(id)!).push({ quando: new Date(), da: 'staff', autore: m.autore, testo: m.testo, interno: m.interno });
   }
   async aggiorna(id: string, mod: ModificaRemota) {
     if (this.giu) this.errore();

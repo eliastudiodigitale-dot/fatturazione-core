@@ -180,6 +180,18 @@ CREATE TABLE crm_sync (
   dettaglio    jsonb
 );
 
+-- Risposte rapide per i ticket (testi pronti con segnaposto {{cliente}}, {{agente}}, {{rif}}), gestite da Impostazioni.
+-- Nessuna cancellazione: una risposta tolta resta con attivo = false.
+CREATE TABLE risposte_rapide (
+  id         bigserial PRIMARY KEY,
+  nome       text NOT NULL CHECK (length(nome) BETWEEN 1 AND 80),
+  testo      text NOT NULL CHECK (length(testo) BETWEEN 1 AND 4000),
+  business   text,                                  -- NULL = valida per tutte le attività
+  creato_da  text NOT NULL,
+  creato_il  timestamptz NOT NULL DEFAULT now(),
+  attivo     boolean NOT NULL DEFAULT true
+);
+
 -- Impostazioni SLA (#46), modificabili dal portale (Impostazioni > SLA) perché cambiano nel tempo e sono diverse per attività.
 -- business '*' = valori di partenza per le attività senza regole proprie. Nessuna cancellazione: un piano tolto resta con attivo = false.
 CREATE TABLE sla_business (
@@ -212,6 +224,6 @@ GRANT SELECT, INSERT, UPDATE ON ticket TO fatturazione_app;
 GRANT SELECT, INSERT ON ticket_eventi TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON ticket_messaggi TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON crm_sync TO fatturazione_app;
-GRANT SELECT, INSERT, UPDATE ON sla_business, sla_piani TO fatturazione_app;
+GRANT SELECT, INSERT, UPDATE ON sla_business, sla_piani, risposte_rapide TO fatturazione_app;
 GRANT SELECT, INSERT, UPDATE ON utenti_dashboard, crm_contatti, crm_note, crm_attivita, crm_opportunita, crm_viste TO fatturazione_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fatturazione_app;
